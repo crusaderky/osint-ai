@@ -17,24 +17,3 @@ There are 3 user personas in this project:
   They query the chatbot about an organizations or individual; this
   triggers a cascade of skill uses which culminates into an easily digestible report.
   They don't need git access.
-
-Constraints
-
-- Minimum new software/inventions. Do not write a brand new harness.
-- Windows support is primary (neither the functional developer nor the final user know linux)
-- The chatbot must be sandboxed and CANNOT read/write files and execute commands
-  on arbitrary disk locations.
-
-Draft design
-
-An installer powershell/.bat script:
-
-1. installs WSL if not present
-2. installs ubuntu 26.04 in WSL
-3. enters WSL
-4. apt installs git
-5. git clones this repo from github
-6. installs pixi
-7. runs pixi install, which creates symlinks in ~/local/bin and sets up bubblewrap, like in @../pixi-llm-recipes/
-8. the pixi environment includes pi, pi extensions, and llamacpp, like @../pixi-llm-recipes/ (but cut down to the minimum)
-9. finally, in Windows, the installer deploys VS Code and ensures it's got the WSL extension.
