@@ -1,0 +1,42 @@
+# Adapted from ../pixi-llm-recipes: CUDA-only Linux binary distribution.
+context:
+  backend: ${{ backend }}
+  fork: Anbeeld/beellama.cpp
+  version: v0.4.6
+  asset_prefix: beellama
+
+package:
+  name: llama-cpp
+  version: "0.4.6"
+
+source:
+  url: https://github.com/${{ fork }}/releases/download/${{ version }}/${{ asset_prefix }}-${{ version }}-bin-ubuntu-cuda-13.3-x64.tar.gz
+  sha256: 0aea47aeb447691335ee2e67938106e5bc6d247ecba8e6974e89aac5da617518
+
+build:
+  number: 0
+  string: cuda_${{ build_number }}
+  flags:
+    - cuda
+  skip: not linux or not x86_64
+  script:
+    file: build.sh
+
+requirements:
+  build:
+    - patchelf
+  run:
+    - libgcc
+    - libstdcxx
+    - libgomp
+    - openssl >=3,<4
+    - cuda-version =13.3
+    - cuda-cudart
+    - libcublas
+    - libcurand
+
+about:
+  homepage: https://github.com/Anbeeld/beellama.cpp
+  license: MIT
+  license_file: LICENSE
+  summary: CUDA-only prebuilt llama.cpp inference server

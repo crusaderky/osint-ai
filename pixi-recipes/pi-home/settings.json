@@ -1,0 +1,9 @@
+{
+  "enableInstallTelemetry": false,
+  "skills": ["/workspace/agents"],
+  "llamaSettings": {
+    "servers": [{"url": "http://127.0.0.1:8080", "name": "Local CUDA"}],
+    "pollingTimeout": 3600000,
+    "serverTimeout": 2000
+  }
+}

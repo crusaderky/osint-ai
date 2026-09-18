@@ -1,0 +1,26 @@
+package:
+  name: pi-extensions
+  version: "1"
+
+source:
+  - path: .
+
+build:
+  number: 0
+  script:
+    file: build.sh
+    env:
+      # Single source of truth for the plugin pins, consumed by both
+      # build.sh and build.bat (space-separated <package>@<version> list).
+      PLUGINS: >-
+        pi-llama-cpp@0.13.0
+        pi-web-access@0.29.0
+        pi-token-speed@0.10.1
+        @juicesharp/rpiv-ask-user-question@2.10.1
+
+requirements:
+  build:
+    - pi-coding-agent =0.85.1
+    - patchelf
+  run:
+    - pi-coding-agent =0.85.1

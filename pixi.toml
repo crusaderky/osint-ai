@@ -1,0 +1,32 @@
+[workspace]
+authors = ["crusaderky <crusaderky@gmail.com>"]
+channels = ["https://prefix.dev/conda-forge"]
+name = "osint-ai"
+platforms = [{ name = "linux-64-glibc234", platform = "linux-64", glibc = "2.34" }]
+preview = ["pixi-build"]
+version = "0.1.0"
+
+[tasks]
+install = "bash scripts/install.sh"
+test = "python -m unittest discover -s tests -v"
+
+# New tools belong here. `pixi add <package>` and `pixi run <command>`
+# work inside the agent sandbox; .pixi is writable Linux storage.
+[dependencies]
+python = "=3.14"
+pip = "*"
+uv = "*"
+git = "*"
+
+[feature.pi.dependencies]
+pi-coding-agent = "=0.85.1"
+pi-extensions = { path = "pixi-recipes/pi-extensions" }
+pi-home = { path = "pixi-recipes/pi-home" }
+
+[feature.llamacpp-binary-cuda.dependencies]
+llama-cpp = { path = "pixi-recipes/llama-cpp-binary", flags = ["cuda"] }
+
+[environments]
+# Default environment is for skill tools, separate from Pi's running runtime.
+agents = ["pi"]
+llamacpp-binary-cuda = { features = ["llamacpp-binary-cuda"], no-default-feature = true }
