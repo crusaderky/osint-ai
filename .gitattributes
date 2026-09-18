@@ -1,0 +1,15 @@
+# SCM syntax highlighting & preventing 3-way merges
+pixi.lock merge=binary linguist-language=YAML linguist-generated=true -diff
+
+# Windows editors and Linux tooling must agree on tracked text line endings.
+* text=auto
+*.md text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.ini text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+windows/launchers/* text eol=lf

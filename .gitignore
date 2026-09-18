@@ -1,0 +1,10 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# Credentials, sessions, model weights and generated caches never belong in Git.
+.pi/
+*.gguf
+*.log
+__pycache__/
+*.py[cod]

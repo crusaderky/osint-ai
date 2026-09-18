@@ -1,0 +1,195 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["*"]
+  workflow_dispatch: # allows you to trigger manually
+
+# When this workflow is queued, automatically cancel any previous running
+# or pending jobs from the same branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -el {0}
+
+# Nothing here writes to the repository: no push, no release, no artifacts.
+permissions:
+  contents: read
+
+# The assistant suite is Linux-only on purpose: `default` resolves for linux-64
+# alone, and the sandbox is bubblewrap, which does not exist on macOS or Windows.
+# The one Windows job installs the *inference* environment - the only thing that
+# resolves for win-64 - and never installs the assistant there. What these jobs
+# cannot prove is listed in docs/testing.md; do not read a green run as a verified
+# Windows installation, GPU, or OAuth.
+
+jobs:
+  unit:
+    name: Unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest # x86-64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # No system bubblewrap here on purpose: the sandbox runs the bubblewrap the
+      # locked environment installs, so the environment below is also what provides
+      # the binary the integration tests probe.
+
+      # setup-pixi keys its cache on pixi.lock, but the packages under
+      # pixi-recipes/ are built from source and editing a recipe does not change
+      # the lock. Without this key, a changed recipe would be tested against a
+      # cached, stale environment.
+      - name: Compute a cache key that covers the local recipes
+        id: cache-key
+        run: |
+          hash=$(find pixi-recipes -type f | sort | xargs cat | sha256sum | cut -c1-16)
+          echo "key=recipes-$hash-" >> "$GITHUB_OUTPUT"
+
+      # `default` is installed so the tests that look inside .pixi/envs/default -
+      # the packaged extension tree and the bundled Pi home - run instead of
+      # skipping. `locked: true` fails a change that did not re-lock pixi.lock
+      # together with pixi.toml. Only main writes the cache, to stay under the
+      # 10 GB Actions cache limit.
+      - name: Install the locked Pixi environment
+        uses: prefix-dev/setup-pixi@v0.11.0
+        with:
+          pixi-version: v0.81.0
+          environments: default
+          cache: true
+          cache-key: ${{ steps.cache-key.outputs.key }}
+          cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+          locked: true
+
+      - name: Unit tests
+        run: pixi run test
+
+      # The bubblewrap tests skip themselves when user namespaces are blocked,
+      # which is the case on GitHub-hosted runners. Say so instead of letting a
+      # skipped run look like a verified sandbox.
+      - name: Report what this run could not prove
+        if: always()
+        run: |
+          bwrap=.pixi/envs/default/bin/bwrap
+          if [ -x "$bwrap" ] && "$bwrap" --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --unshare-all --share-net /bin/true 2>/dev/null; then
+            echo "bubblewrap ran: the sandbox integration tests were executed." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo ":warning: unprivileged bubblewrap is unavailable on this runner, so the sandbox integration tests were skipped. This run proves nothing about the sandbox." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+  installer:
+    name: Windows installer parse (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest # x86-64
+          - ubuntu-latest # x86-64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # No Pixi environment here: this test only parses windows/Install.ps1,
+      # checks its shell-argument escaping and syntax-checks the Bash it embeds.
+      # Parsing is not installing; the Windows acceptance matrix in
+      # docs/testing.md still has to be run by hand on a real PC.
+      - name: Parse the installer
+        run: pwsh -NoProfile -File tests/Test-Installer.ps1
+
+  sandbox-smoke:
+    name: Sandbox smoke test (bubblewrap)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The job installs no bubblewrap and no Pixi environment: the sandbox binary
+      # is the one the locked environment installs, and the script below installs
+      # that environment into its own copy before it probes anything. This step is
+      # only the cheap pre-check that decides whether that download is worth it.
+      - name: Check unprivileged user namespaces
+        id: userns
+        run: |
+          if unshare --user --map-root-user --mount /bin/true; then
+            echo 'ok=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ok=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      # GitHub-hosted runners block unprivileged user namespaces, so this job
+      # reports itself as not run there. On a runner where namespaces work - a
+      # self-hosted one, or a WSL/VM maintainer - it installs the real locked
+      # environment and starts Pi inside the sandbox.
+      - name: Report a runner that cannot sandbox
+        if: steps.userns.outputs.ok != 'true'
+        run: echo "::warning::unprivileged user namespaces are blocked on this runner, so the sandbox smoke test did not run. Run tests/smoke_pixi_sandbox.py where bubblewrap works."
+
+      # The smoke test copies the checkout and installs the locked environment
+      # into that copy itself, so this job only needs the pixi binary.
+      - name: Install Pixi
+        if: steps.userns.outputs.ok == 'true'
+        uses: prefix-dev/setup-pixi@v0.11.0
+        with:
+          pixi-version: v0.81.0
+          run-install: false
+          cache: false
+
+      - name: Sandbox smoke test
+        if: steps.userns.outputs.ok == 'true'
+        run: python3 tests/smoke_pixi_sandbox.py
+
+  windows-inference:
+    name: Native Windows inference (win-64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The only place the win-64 half of the manifest is exercised: the recipe
+      # downloads the pinned Windows Vulkan release asset and installs it into the
+      # environment the desktop icons run. `default` is deliberately absent - Pi
+      # never runs natively on Windows.
+      - name: Install Pixi
+        uses: prefix-dev/setup-pixi@v0.11.0
+        with:
+          pixi-version: v0.81.0
+          run-install: false
+          cache: false
+
+      - name: Install the locked Windows inference environment
+        run: pixi install --locked -e llamacpp-binary-vulkan
+
+      # A hosted runner has no GPU driver, so this also proves the documented
+      # fallback: the Vulkan backend is a shared library next to the executable,
+      # and a machine that cannot load it still runs the same binary on the CPU.
+      - name: Check the native binary
+        run: |
+          pixi run -e llamacpp-binary-vulkan llama-server --version
+          pixi run -e llamacpp-binary-vulkan llama-server --list-devices
+
+      # The controller is the same file the desktop icons run. Its Windows code
+      # path - no fork, no fcntl, process identity from a creation time, taskkill -
+      # exists nowhere on Linux, and `_server start` only returns once the server
+      # answers /health, so this starts and stops a real server.
+      - name: Start and stop inference the way the desktop icons do
+        run: |
+          pixi run --locked -e llamacpp-binary-vulkan _server start
+          pixi run --locked -e llamacpp-binary-vulkan _server stop

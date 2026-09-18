@@ -1,0 +1,83 @@
+[workspace]
+channels = ["https://prefix.dev/conda-forge"]
+name = "osint-ai"
+# Two platforms, because the Windows deployment installs the inference
+# environment natively: Pi runs inside WSL, but llama.cpp runs on Windows itself,
+# where it reaches the GPU directly. Only that environment resolves for win-64
+# (see [environments] below), so the assistant's own tools stay Linux-only.
+platforms = [
+    { name = "linux-64-glibc234", platform = "linux-64", glibc = "2.34" },
+    "win-64",
+]
+preview = ["pixi-build"]
+version = "0.1.0"
+
+# The functional assistant works in `workspace/`; these tasks start it and
+# maintain the code deployment. Both assistant tasks run the same sandbox
+# launcher with a different first argument: `--native` uses the `workspace/` of
+# this checkout, `--wsl` the `workspace/` of the Windows checkout that the boot
+# helper mounts at /mnt/osint-ai. Pi only ever starts inside bubblewrap.
+[tasks]
+install = { depends-on = ["install-apparmor", "install-check"] }
+install-apparmor = "bash scripts/install-apparmor.sh"
+install-check = "bash scripts/install-check.sh"
+osint-pi = "bash scripts/bwrap-pi.sh --native"
+osint-pi-wsl = "bash scripts/bwrap-pi.sh --wsl"
+start-server = { depends-on = [{ task = "_server", environment = "llamacpp-binary-vulkan", args = ["start"] }] }
+restart-server = { depends-on = [{ task = "_server", environment = "llamacpp-binary-vulkan", args = ["restart"] }] }
+# Stopping needs no inference program, so it does not pull that environment.
+# Only the Linux deployment has a default environment: on Windows the Stop icon
+# runs `_server stop` in the inference environment instead.
+stop-server = "python -I scripts/server.py stop"
+update-project = "bash scripts/update-project.sh"
+test = "python -m unittest discover -s tests -v"
+
+# Tools live here and are installed by a maintainer in the project root. The
+# sandbox mounts this environment read-only, so the assistant asks for a tool
+# instead of installing it silently.
+[dependencies]
+python = "=3.14"
+bubblewrap = "*"
+pip = "*"
+uv = "*"
+git = "*"
+# Spreadsheets: Excel 97-2003 (.xls), Excel 2007+ (.xlsx) and binary sheets.
+pandas = "*"
+openpyxl = "*"
+xlrd = "*"
+pyxlsb = "*"
+# Reports: Markdown to PDF, plus PDF reading. `poppler` provides pdfinfo,
+# pdftotext and pdftoppm; `pandoc` and `weasyprint` are the PDF engine. A skill
+# script may only use these, coreutils, or a base Linux program - a test in
+# tests/test_skeleton.py enforces it, so add the package here first.
+pandoc = "*"
+weasyprint = "*"
+poppler = "*"
+
+[feature.pi.dependencies]
+pi-coding-agent = "*"
+pi-extensions = { path = "pixi-recipes/pi-extensions" }
+pi-home = { path = "pixi-recipes/pi-home" }
+
+# Vulkan on both platforms this project supports, CPU inference on a PC where
+# no Vulkan device answers.
+[feature.llamacpp-binary-vulkan]
+platforms = ["linux-64-glibc234", "win-64"]
+
+[feature.llamacpp-binary-vulkan.dependencies]
+llama-cpp = { path = "pixi-recipes/llama-cpp-binary", flags = ["vulkan"] }
+# The controller that starts, health-checks and stops the server.
+python = "=3.14"
+
+# Runs inside the inference environment: `python` and `llama-server` are that
+# environment's own, and Pixi has already installed them. Windows runs the same
+# task from a desktop shortcut: `pixi run -e llamacpp-binary-vulkan _server stop`
+# works when the default environment, which holds `stop-server`, is absent.
+[feature.llamacpp-binary-vulkan.tasks]
+_server = { cmd = "python -I scripts/server.py {{ action }}", args = [{ arg = "action", default = "restart", choices = ["start", "stop", "restart"] }] }
+
+[environments]
+# Default environment is for skill tools, separate from Pi's running runtime.
+# Linux only: Pi itself never runs natively on Windows.
+default = { features = ["pi"], platforms = ["linux-64-glibc234"] }
+llamacpp-binary-vulkan = { features = ["llamacpp-binary-vulkan"], no-default-feature = true, platforms = ["linux-64-glibc234", "win-64"] }

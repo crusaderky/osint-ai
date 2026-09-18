@@ -1,0 +1,220 @@
+name: llama.cpp
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["*"]
+  workflow_dispatch: # allows you to trigger manually
+
+# When this workflow is queued, automatically cancel any previous running
+# or pending jobs from the same branch
+concurrency:
+  group: llamacpp-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -el {0}
+
+# Nothing here writes to the repository: no push, no release, no artifacts.
+permissions:
+  contents: read
+
+# The unit suite never loads a model, and it cannot: it has no weights and no
+# server. This job is the other half - it starts the real inference server the
+# way a maintainer does, starts the real assistant through the sandbox launcher,
+# and asks it a question. It is a separate workflow because it downloads the
+# Vulkan llama.cpp build plus a few hundred MB of weights, which no other job
+# needs. The Windows half - the same build inside the Windows checkout, and the
+# assistant reaching it from inside WSL - is a job of its own in ci.yml, on a
+# Windows runner.
+#
+# A hosted runner has no GPU. That is deliberate: it proves the documented CPU
+# fallback works on a machine with no Vulkan device at all, because the ggml
+# Vulkan backend is loaded from the executable's own directory and a machine that
+# cannot load it still runs on the processor. The `LFM2.5-230M` preset used here
+# is marked unit-test only in `models.ini`; it is not a model for compliance work.
+#
+# `pixi r install` is the documented Linux installation, and its AppArmor step is
+# what lets the pinned bubblewrap start on a runner that restricts unprivileged
+# user namespaces. Whether it worked is reported, not assumed: the assistant half
+# runs only when a real sandbox can start, and the job says which half it ran.
+#
+# Do not end a step with a bare `exit 0`. `defaults.run.shell` below is a login
+# shell, and bash runs `~/.bash_logout` when a script exits through the `exit`
+# builtin: Ubuntu's default file there ends with
+# `[ -x /usr/bin/clear_console ] && /usr/bin/clear_console -q`, which fails on a
+# runner without that binary, so a successful step is reported as "Process
+# completed with exit code 1" with no output at all. A natural exit - or `exit 1` -
+# keeps the real status. Fail with a nonzero command and let success fall off the
+# end; tests/test_skeleton.py asserts this file stays free of it.
+jobs:
+  smoke:
+    name: Local inference + assistant smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # setup-pixi keys its cache on pixi.lock, but the packages under
+      # pixi-recipes/ are built from source and editing a recipe does not change
+      # the lock. Without this key, a changed recipe would be tested against a
+      # cached, stale environment.
+      - name: Compute a cache key that covers the local recipes
+        id: cache-key
+        run: |
+          hash=$(find pixi-recipes -type f | sort | xargs cat | sha256sum | cut -c1-16)
+          echo "key=recipes-$hash-" >> "$GITHUB_OUTPUT"
+
+      - name: Install the locked Pixi environments
+        uses: prefix-dev/setup-pixi@v0.11.0
+        with:
+          pixi-version: v0.81.0
+          environments: default llamacpp-binary-vulkan
+          cache: true
+          cache-key: ${{ steps.cache-key.outputs.key }}
+          cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+          locked: true
+
+      # The documented Linux installation. Its AppArmor step is what lets the
+      # pinned bubblewrap start on a runner that restricts unprivileged user
+      # namespaces, and it is the only root step a Linux install has - a hosted
+      # runner has passwordless sudo for it. Its status is not what decides: the
+      # probe below is, because installation can also fail on a runner where no
+      # profile would help at all.
+      - name: Install and check the Linux deployment
+        id: install
+        continue-on-error: true
+        run: pixi r install
+
+      # Can this runner start a sandbox at all? The answer decides which half of
+      # the job runs, and it is measured instead of assumed: a green job must
+      # never imply a containment that did not happen.
+      #
+      # Only one of the three ways this can fail is the runner's policy, and that
+      # is the one that skips the assistant half. A bubblewrap missing from the
+      # locked environment is a broken installation. So is a pinned binary that
+      # still cannot start a sandbox when this Ubuntu grants a user namespace only
+      # to a program an AppArmor profile covers
+      # (`apparmor_restrict_unprivileged_userns` is 1): `pixi r install` loads that
+      # profile, so nothing here can fix it. When there is no such restriction to
+      # point at - a kernel setting, a container, another security module - no
+      # profile can help either, and the job records a warning and runs the
+      # inference half only.
+      - name: Probe the sandbox this runner can start
+        id: sandbox
+        run: |
+          set -euo pipefail
+          bwrap=.pixi/envs/default/bin/bwrap
+          restriction=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ ! -x $bwrap ]]; then
+            echo "The locked environment installed no bubblewrap at $bwrap: the installation is broken, not this runner's policy." >&2
+            false
+          elif "$bwrap" --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --unshare-all --share-net /bin/true; then
+            echo 'The pinned bubblewrap starts a sandbox.' | tee -a "$GITHUB_STEP_SUMMARY"
+            echo 'ok=yes' >> "$GITHUB_OUTPUT"
+          elif [[ -r $restriction ]] && [[ $(cat "$restriction") == 1 ]]; then
+            echo "AppArmor still refuses $bwrap a user namespace after pixi r install: the sandbox is broken on this runner." >&2
+            false
+          else
+            echo "::warning::this runner refuses unprivileged user namespaces outright, so an AppArmor profile cannot help: running the inference half only, and this run proves nothing about the sandbox."
+            echo 'ok=no' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache GGUF
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/huggingface/hub
+          key: llama-model-LFM2.5-350M-Q4_K_M
+
+      - name: Start local inference
+        run: pixi r start-server
+
+      # Load the unit-test preset as its own step, before the assistant asks: a
+      # cold run downloads the weights, and that wait belongs to a step that says
+      # what it is waiting for instead of to the assistant's first request. The
+      # load is asynchronous, so this polls the model list for `loaded` - and a
+      # GET tells the server nothing to load, so the polling cannot be the thing
+      # that loads the model.
+      - name: Load the unit-test preset
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --request POST --header 'Content-Type: application/json' \
+            --data '{"model": "LFM2.5-230M"}' \
+            http://127.0.0.1:8080/models/load
+          echo
+          deadline=$((SECONDS + 1800))
+          while true; do
+            state=$(curl --fail --silent http://127.0.0.1:8080/models | python3 -c 'import json, sys; models = json.load(sys.stdin)["data"]; model = next((m for m in models if m.get("id") == "LFM2.5-230M"), None); status = (model or {}).get("status") or {}; print("missing" if model is None else "failed" if status.get("failed") else status.get("value", "unknown"))')
+            case "$state" in
+              loaded) break ;;
+              failed)
+                echo "The server could not load LFM2.5-230M; its log is dumped below." >&2
+                false
+                ;;
+              missing)
+                echo "LFM2.5-230M is not in the server's model list; its log is dumped below." >&2
+                false
+                ;;
+            esac
+            if ((SECONDS >= deadline)); then
+              echo "Timed out waiting for LFM2.5-230M to load; its last state was $state." >&2
+              false
+            fi
+            sleep 10
+          done
+          echo 'LFM2.5-230M is loaded; the assistant no longer pays for the download.'
+
+      # The real assistant, inside the real sandbox, through the project launcher
+      # rather than a bare `pi` - a sandbox that cannot start has to fail this
+      # job. Only when the probe above found a sandbox, because this step is the
+      # one half a runner without user namespaces cannot run.
+      - name: pi Hello world
+        if: steps.sandbox.outputs.ok == 'yes'
+        run: |
+          set -o pipefail
+          # The status is checked by hand because the login shell has no `set -e`:
+          # otherwise the step would report the last command alone, and a Pi that
+          # died inside bubblewrap still leaves a log file behind.
+          pixi r osint-pi -- --model LFM2.5-230M -p 'Hello world' | tee pi-smoke.log
+          status=$?
+          test -s pi-smoke.log
+          test "$status" -eq 0
+
+      - name: Restart local inference
+        run: pixi r restart-server
+
+      # The same question with the weights now cached, through a server that was
+      # restarted underneath it: this is what proves a restart leaves the preset
+      # reachable by name, with the server listing it unloaded and the request
+      # itself loading it again.
+      - name: pi Hello world after a restart
+        if: steps.sandbox.outputs.ok == 'yes'
+        run: |
+          set -o pipefail
+          pixi r osint-pi -- --model LFM2.5-230M -p 'Hello world' | tee pi-smoke-restart.log
+          status=$?
+          test -s pi-smoke-restart.log
+          test "$status" -eq 0
+
+      # Stop and dump on failure too: a server left running would keep the job
+      # alive, and the log is the only place the failure is explained. The dump
+      # tolerates a missing file, which is what a failure before the first start
+      # looks like - it must not become a second, confusing failure.
+      - name: Stop local inference
+        if: always()
+        run: pixi r stop-server
+
+      - name: Dump the inference log
+        if: always()
+        run: |
+          log="$HOME/.local/state/osint-ai/server-state/llama-server.log"
+          if [[ -f $log ]]; then
+            cat "$log"
+          else
+            echo "No inference log at $log."
+          fi

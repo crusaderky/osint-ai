@@ -1,0 +1,28 @@
+#!/bin/bash -l
+# Desktop/terminal startup: report whether local inference answers, then open the
+# chatbot.
+#
+# This deployment runs llama.cpp natively on Windows, outside the distribution, so
+# this script cannot start it - the Start llama.cpp desktop icon does, and the
+# assistant reaches it through the WSL network. A missing server must not stop the
+# assistant: it starts on a hosted model instead.
+set -uo pipefail
+root=${OSINT_LINUX_PROJECT:-/home/osint/osint-ai}
+if [[ -r /etc/osint-ai.json ]]; then
+    root=$(/usr/bin/python3 -I -c 'import json;print(json.load(open("/etc/osint-ai.json"))["linux_project"])')
+fi
+cd "$root" || { echo "OSINT AI: missing Linux checkout: $root" >&2; exit 1; }
+launcher=/usr/local/lib/osint-ai/sandbox.py
+[[ -f $launcher ]] || launcher=$root/scripts/sandbox.py
+url=$(/usr/bin/python3 -I "$launcher" --wsl --inference-url 2>/dev/null || true)
+url=${url:-http://127.0.0.1:8080}
+if curl -fsS --max-time 2 "$url/health" 2>/dev/null | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+    printf 'Local inference is running on %s.\n' "$url"
+else
+    printf 'Local inference is not running. Use the "Start llama.cpp" desktop icon.\n'
+    printf 'The assistant uses an online model until then; see the README.\n'
+fi
+pixi r osint-pi-wsl || {
+    printf '\nStartup failed. Press Enter to close this window.\n'
+    read -r _
+}
