@@ -1,0 +1,90 @@
+# Adapted from ../pixi-llm-recipes, with two deliberate differences:
+#
+# * `source` pins the release asset by SHA-256 instead of letting the build
+#   script curl it unchecked, so a release asset is verified before it is
+#   installed (docs/security.md item 1 claims exactly that).
+# * only the backends this project ships are variants: this project runs
+#   llama.cpp on Vulkan, with the CPU build as the fallback a Vulkan-less PC
+#   uses, and never on CUDA, ROCm or SYCL.
+#
+# The runtime is upstream llama.cpp, not the BeeLlama.cpp fork that was used
+# before. The fork was kept for two preset options, `kv-tail-tokens` (an exact
+# BF16 KV tail) and `cache-type-v = q3_0`. Both are gone: the fork's own Vulkan
+# asset does not implement the exact tail, it falls back to the path it calls
+# "catastrophic generic attention" with 86 graph splits per generated token, and
+# upstream's router refuses an unknown preset key outright (`option
+# 'kv-tail-tokens' not recognized in preset`), so a fork-only flag is a server
+# that does not start rather than a server that is slower. Upstream quantizes
+# both K and V, to q4_0 among others, which is what `models.ini` asks for.
+context:
+  # The active backend is selected via the `backend` matrix in variants.yaml and
+  # exposed to consumers as a build `flag` (see pixi.toml).
+  backend: ${{ backend }}
+  # Asset names are per backend and platform; `ubuntu-*` are tar.gz and `win-*`
+  # are zip, and build.sh / build.bat install whatever was extracted.
+  fork: ggml-org/llama.cpp
+  # The upstream release tag: `b` and the build number, which is what the
+  # released assets are named after.
+  version: b11514
+
+package:
+  name: llama-cpp
+  # The build number on its own: conda wants a version, and `b11514` is a tag.
+  version: "11514"
+
+source:
+  # Every hash is the SHA-256 GitHub publishes for that release asset. A wrong
+  # value fails the install with "sha256 checksum validation failed", which is
+  # the point; re-read the release metadata when `version` changes.
+  - if: linux and backend == "cpu"
+    then:
+      url: https://github.com/${{ fork }}/releases/download/${{ version }}/llama-${{ version }}-bin-ubuntu-x64.tar.gz
+      sha256: b2b617fb28e9d1444235c30bb09a3704789a1840e16ead58a5f7be6eeae8beef
+  - if: linux and backend == "vulkan"
+    then:
+      url: https://github.com/${{ fork }}/releases/download/${{ version }}/llama-${{ version }}-bin-ubuntu-vulkan-x64.tar.gz
+      sha256: 0056cbd32440e646bbe8e3a3f797bf2aef15c9dd5ebf77b9b19830434c1ae541
+  - if: win and backend == "cpu"
+    then:
+      url: https://github.com/${{ fork }}/releases/download/${{ version }}/llama-${{ version }}-bin-win-cpu-x64.zip
+      sha256: 5a1d6ba1b414ab0234b12e29d911b3b8fe63051b4455215e184cf74870eac596
+  - if: win and backend == "vulkan"
+    then:
+      url: https://github.com/${{ fork }}/releases/download/${{ version }}/llama-${{ version }}-bin-win-vulkan-x64.zip
+      sha256: e1eaddcde761b1f839b9c6d5924b97f2698fba22068ca3b63f129c3caf55b88f
+
+build:
+  number: 0
+  string: ${{ backend }}_${{ build_number }}
+  script:
+    # Extension-less: resolves to build.sh on Linux and build.bat on Windows.
+    file: build
+    env:
+      BACKEND: ${{ backend }}
+      FORK: ${{ fork }}
+      VERSION: ${{ version }}
+  # Expose each backend as a selectable build flag, e.g. `flags = ["vulkan"]`.
+  flags:
+    - ${{ backend }}
+  # The Vulkan asset is the one this project ships; a variant without a flag
+  # should not silently pick the CPU build instead.
+  variant:
+    down_prioritize_variant: ${{ 0 if backend == "vulkan" else 1 }}
+  # The x86-64 release assets are the only ones that exist for these backends.
+  skip: not x86_64
+
+requirements:
+  build:
+    - curl
+    - if: linux
+      then:
+        - patchelf
+  run:
+    # The Linux binaries are linked against the GCC OpenMP runtime.
+    - libgomp
+
+about:
+  homepage: https://github.com/ggml-org/llama.cpp
+  license: MIT
+  license_file: LICENSE
+  summary: LLM inference in C/C++ (prebuilt binaries)

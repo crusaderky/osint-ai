@@ -1,0 +1,7 @@
+#!/bin/bash -p
+# Installed by windows/provision-wsl.sh. Plain Linux mode: the assistant works
+# in the workspace/ of the Linux checkout, which is mounted whole at /osint-ai
+# inside the sandbox.
+set -euo pipefail
+exec env OSINT_PROJECT_ROOT="${OSINT_PROJECT_ROOT:-/home/osint/osint-ai}" \
+    /usr/local/lib/osint-ai/bwrap-pi.sh --native "$@"

@@ -1,0 +1,9 @@
+{
+  "enabledModels": [
+    "openrouter/deepseek/deepseek-v4.1-flash",
+    "openrouter/z-ai/glm-5.3-flash",
+    "openrouter/xiaomi/mimo-v2.6-pro",
+    "openrouter/xiaomi/mimo-v2.6-flash",
+    "llama.cpp/MiniCPM5-2B"
+  ]
+}

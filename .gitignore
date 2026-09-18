@@ -1,0 +1,19 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+*.log
+__pycache__/
+*.py[cod]
+
+workspace/*.txt
+workspace/*.html
+workspace/*.md
+workspace/*.pdf
+workspace/*.xls
+workspace/*.xlsx
+workspace/*.doc
+workspace/*.docx
+workspace/*.jpg
+workspace/*.png
+workspace/*.svg

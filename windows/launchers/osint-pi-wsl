@@ -1,0 +1,6 @@
+#!/bin/bash -p
+# Installed by windows/provision-wsl.sh. WSL mode: the assistant works in the
+# workspace/ of the Windows checkout, which the boot hook mounts at /mnt/osint-ai
+# and the sandbox re-mounts whole at /osint-ai.
+set -euo pipefail
+exec /usr/local/lib/osint-ai/bwrap-pi.sh --wsl "$@"
