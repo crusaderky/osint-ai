@@ -1,47 +1,90 @@
-# OSINT AI project instructions
+# OSINT AI — developer instructions
 
-This project helps compliance officers research organizations and individuals
-using publicly accessible sources. Separate supported facts, inferences, and
-unknowns. Cite original sources and never invent verification results.
+This checkout is the **project root**: Git, `pixi.toml`, `pixi.lock`, the
+installer and the sandbox live here. You are here to maintain the software, not
+to do compliance research. Start Pi in this directory for maintenance work.
 
-## Where to write skills — mandatory
+The end user is a compliance officer with no programming background, and the
+result must run on a Windows 11 PC through WSL. Prefer boring, verifiable
+solutions and explain results in plain language.
 
-The working project is `/workspace`, backed by the user's Windows checkout.
-Create every user-authored skill at:
+## Layout
 
-```text
-/workspace/agents/<skill-name>/SKILL.md
+| Path | Purpose |
+| --- | --- |
+| `README.md` | Absolute-beginner guide: install, Git, Pi commands, AGENTS.md, skills. Keep it jargon-free. |
+| `AGENTS.md` | This file: instructions for maintaining the project. |
+| `workspace/` | The **functional** workspace. Its own `AGENTS.md` and `.agents/skills/` drive the chatbot; that is a different job from this one. |
+| `wsl/` | Windows installer (`Install.cmd`, `Install.ps1`) and the trusted Linux-side runtime: `wsl/scripts/` sandbox launcher, server controller, boot mount helper, provisioning. |
+| `pixi-recipes/` | Local build recipes: Pi, extensions, the bundled home configuration, the CUDA llama.cpp binary. |
+| `models.ini` | Inference presets snapshot used by the installed runtime. |
+| `docs/` | `development.md`, `security.md`, `testing.md`, `upstream.md`. |
+| `tests/` | Linux/Python tests plus the PowerShell installer parse test. |
+
+## Two checkouts, one product
+
+In WSL the repository exists twice, by design:
+
+* `/home/osint/osint-ai` — Linux checkout. Owns Git, Pixi environments and the
+  code that executes. Updated by a maintainer with `update-project`.
+* `C:\Users\<name>\osint-ai`, mounted at `/mnt/osint-ai` — Windows checkout. The
+  user edits `workspace/` there and commits with a Windows Git GUI.
+
+`osint-pi-wsl` binds the Linux checkout **read-only** at `/opt/osint-ai/project`
+and the Windows `workspace/` **read-write** at `/workspace`. The sandboxed agent
+sees neither root file, neither `.git`, and cannot change the program. Tell the
+user that root-level changes must be made in the project root checkout, then
+`update-project`d on the WSL side.
+
+## Tasks
+
+```bash
+pixi r test                 # python unittest suite; run before declaring anything done
+pixi r osint-pi             # chatbot in workspace/ of this checkout (plain Linux)
+pixi r osint-pi-wsl         # chatbot in workspace/ of the Windows checkout
+pixi r install              # installation check and usage summary
+pixi r restart-server       # local inference (CPU fallback when no CUDA device works)
+pixi r update-project       # trusted: git pull --ff-only + pixi install --locked -e agents
 ```
 
-Put helper scripts, references, and assets beneath the same skill directory.
-Use YAML frontmatter with `name` and `description`. Pi explicitly discovers
-`./agents`; run `/reload` after creating or changing skills.
+For code maintenance you run Pi yourself, unsandboxed, in this checkout:
+`pixi shell -e agents` and then `pi`. That is different from the sandboxed
+assistant, which always works in `workspace/`.
 
-**Never put user skills in WSL `$HOME`, `~/.pi/agent/skills`, `~/.agents`,
-`.agents/skills`, or `.pi/skills`.** The user must be able to inspect every skill
-in Windows File Explorer and Notepad, then commit it using a Windows Git GUI.
-Do not copy or synchronize generated skills into a second checkout.
+`pixi r osint-pi*` and `pixi r *-server` are thin wrappers: they exec the
+root-owned launcher when installed, then enter bubblewrap before Pi starts.
 
-## Editable files and tools
+Adding or updating a dependency is a project-root job:
 
-- You may edit this `AGENTS.md`, `pixi.toml`, `pixi.lock`, and project content.
-- Add Python tools with `pixi add <conda-package>` or
-  `pixi add --pypi <package>`. Use `pixi run python ...` for the default tools
-  environment. Do not use sudo or install into system Python.
-- `.pixi` is writable Linux storage mounted inside the Windows checkout.
-  Do not move it, replace it with a symlink, or enable detached environments.
-- Installer scripts and bundled recipes are read-only during skill authoring.
-- Git metadata is hidden. Do not commit, push, configure Git, or request GitHub
-  credentials. The human reviews and publishes through a Windows Git GUI.
-- Pi logins and sessions are managed separately in the application's private
-  Linux state. Never write API keys, tokens, sessions, or model weights into
-  the repository.
-- Local inference runs outside the agent sandbox. Do not attempt to bypass the
-  sandbox or launch Windows executables. Tell the user to run `start-server`
-  in their OSINT AI WSL terminal when local inference is needed.
+```bash
+pixi add <conda-package>            # or: pixi add --pypi <package>
+pixi lock                            # keep pixi.lock in step
+pixi install -e agents && pixi r test
+```
 
-## Reviewing changes
+Commit `pixi.toml` **and** `pixi.lock` together. Inside the sandbox the
+environment is read-only, so a functional agent can never install its own
+dependencies; it must ask instead.
 
-Summarize created/changed files using Windows-friendly relative paths such as
-`agents/company-check/SKILL.md`. Explain how to test the skill and what remains
-unverified. The user has no programming or Git experience: use plain language.
+## Rules for this repository
+
+* Never commit, push, rebase or configure Git, and never ask for GitHub
+  credentials. The human reviews and publishes with a Windows Git GUI. List the
+  files you created or changed, with repository-relative paths, and say what is
+  unverified.
+* Never write API keys, tokens, model weights, Pi sessions or anything personal
+  into the checkout.
+* Keep the security boundaries described in [`docs/security.md`](docs/security.md)
+  intact: bubblewrap before Pi, allowlisted mounts, cleared environment, no
+  `.git` inside the sandbox, no writable copy of the inference runtime, no
+  Windows drive other than the mounted checkout, and no project code executed
+  outside the sandbox at boot or startup.
+* Do not add passwordless `sudo`, do not load shell code from `workspace/`, and
+  do not let the boot helper read anything but `/etc/osint-ai.json`.
+* Functional guidance belongs to the functional workspace: user-facing skill
+  rules go in `workspace/AGENTS.md` and `workspace/.agents/skills/`, never into
+  this file. User skills are always `workspace/.agents/skills/<name>/SKILL.md` —
+  never `~/.pi`, `~/.agents` or `.pi/skills`.
+* Update `README.md`, `docs/` and `tests/` in the same change as behaviour.
+  `docs/testing.md` lists what Linux tests cannot prove; do not imply Windows,
+  GPU or OAuth behaviour from a green test run.

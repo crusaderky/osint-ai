@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Optional Linux integration: install and launch real Pi inside the sandbox.
+"""Optional Linux integration: install the real environment and run Pi sandboxed.
 
-Downloads packages into temporary Linux storage; no Windows/root changes.
+Downloads packages into temporary Linux storage; no Windows or root changes.
 Run explicitly: python3 tests/smoke_pixi_sandbox.py
 """
 
@@ -17,9 +17,33 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("sandbox", ROOT / "scripts/sandbox.py")
+spec = importlib.util.spec_from_file_location("sandbox", ROOT / "wsl/scripts/sandbox.py")
 sandbox = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sandbox)
+
+
+def rpc_command(process, payload, timeout=90):
+    process.stdin.write((json.dumps(payload) + "\n").encode())
+    process.stdin.flush()
+    deadline = time.monotonic() + timeout
+    buffer = b""
+    with selectors.DefaultSelector() as selector:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        while time.monotonic() < deadline:
+            for key, _ in selector.select(timeout=1):
+                chunk = os.read(key.fileobj.fileno(), 65536)
+                if not chunk:
+                    raise RuntimeError("Pi exited before responding")
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    if line.startswith(b"{"):
+                        event = json.loads(line)
+                        if event.get("type") == "extension_error":
+                            raise RuntimeError(event)
+                        if event.get("id") == payload["id"]:
+                            return event
+    raise RuntimeError("timed out waiting for Pi")
 
 
 def main():
@@ -29,52 +53,39 @@ def main():
     logpath = Path(tempfile.gettempdir()) / "osint-pixi-sandbox-smoke.log"
     with tempfile.TemporaryDirectory(prefix="osint-pixi-smoke-") as directory:
         root = Path(directory)
-        project = root / "checkout"
+        project = root / "linux checkout"
         shutil.copytree(
             ROOT,
             project,
             ignore=shutil.ignore_patterns(".pixi", ".git", "__pycache__", ".ruff_cache", "*.log"),
         )
-        (project / ".git").mkdir()
-        (project / ".pixi").mkdir()
-        skill = project / "agents/smoke-test"
-        skill.mkdir()
+        workspace = project / "workspace"
+        skill = workspace / ".agents/skills/smoke-test"
+        skill.mkdir(parents=True)
         (skill / "SKILL.md").write_text(
-            "---\nname: smoke-test\ndescription: Packaging smoke test.\n---\nTest only.\n"
+            "---\nname: smoke-test\ndescription: Packaging smoke test skill for CI only.\n---\n"
+            "Test only.\n"
         )
         state = root / "state"
-        (state / "pixi").mkdir(parents=True)
-        (state / "agent-home").mkdir()
-        command = [
-            "/usr/local/bin/pixi",
-            "run",
-            "--manifest-path",
-            "/workspace/pixi.toml",
-            "-e",
-            "agents",
-            "/usr/local/lib/osint-ai/pi-entry.sh",
-        ]
-        args = sandbox.build_command(project, state, command, pi_args=["--version"])
-        # Emulate root-owned installation within the namespace only.
-        index = args.index("--chdir")
-        args[index:index] = [
-            "--tmpfs",
-            "/usr/local",
-            "--ro-bind",
-            str(Path(pixi).resolve()),
-            "/usr/local/bin/pixi",
-            "--ro-bind",
-            str(ROOT / "scripts"),
-            "/usr/local/lib/osint-ai",
-        ]
+        (state / "agent-home").mkdir(parents=True)
+
+        print("Installing the locked 'agents' environment into the copy (this downloads)...")
+        subprocess.run(
+            [pixi, "install", "--locked", "-e", "agents", "--manifest-path", str(project / "pixi.toml")],
+            check=True,
+        )
+
+        args = sandbox.build_command(
+            project, workspace, state, mode="native", pi_args=["--version"]
+        )
         with logpath.open("w") as log:
             result = subprocess.run(args, stdout=log, stderr=subprocess.STDOUT, check=False)
         if result.returncode:
             raise SystemExit(f"Sandbox Pi startup failed ({result.returncode}). Log: {logpath}")
-        assert (state / "agent-home/.pi/agent/settings.json").is_file()
-        assert not list((project / ".pixi").iterdir()), "Pixi wrote through to Windows storage"
-        # RPC is used only by this test, not as a replacement UI/harness.
-        # It exercises actual extension loading and explicit agents/ discovery.
+        assert (state / "agent-home/.pi/agent/settings.json").is_file(), "Pi home was not prepared"
+
+        # RPC is used only by this test: it exercises real extension loading and
+        # explicit .agents/skills discovery without calling a model.
         index = args.index("OSINT_PI_ARGS") + 1
         args[index] = base64.b64encode(
             json.dumps(["--mode", "rpc", "--no-session"]).encode()
@@ -86,32 +97,12 @@ def main():
             ) as process,
         ):
             try:
-                process.stdin.write(b'{"type":"get_commands","id":"smoke"}\n')
-                process.stdin.flush()
-                buffer = b""
-                response = None
-                deadline = time.monotonic() + 45
-                with selectors.DefaultSelector() as selector:
-                    selector.register(process.stdout, selectors.EVENT_READ)
-                    while time.monotonic() < deadline and response is None:
-                        for key, _ in selector.select(timeout=1):
-                            chunk = os.read(key.fileobj.fileno(), 65536)
-                            if not chunk:
-                                raise RuntimeError(f"Pi exited before RPC response; see {logpath}")
-                            buffer += chunk
-                            while b"\n" in buffer:
-                                line, buffer = buffer.split(b"\n", 1)
-                                if not line.startswith(b"{"):
-                                    continue
-                                event = json.loads(line)
-                                if event.get("type") == "extension_error":
-                                    raise RuntimeError(event)
-                                if event.get("id") == "smoke":
-                                    response = event
-                assert response and response.get("success"), f"No command response; see {logpath}"
+                response = rpc_command(process, {"type": "get_commands", "id": "smoke"})
+                assert response.get("success"), f"No command response; see {logpath}"
                 names = {entry["name"] for entry in response["data"]["commands"]}
-                assert "models" in names, f"pi-llama-cpp did not load: {names}"
-                assert "skill:smoke-test" in names, f"agents/ skill not discovered: {names}"
+                assert "models" in names, f"pi-llama-cpp did not load: {sorted(names)}"
+                assert "skill:smoke-test" in names, f"skill not discovered: {sorted(names)}"
+                assert "skill:markdown-pdf" in names and "skill:spreadsheet-reader" in names
             finally:
                 process.terminate()
                 try:
@@ -120,7 +111,8 @@ def main():
                     process.kill()
                     process.wait()
         print(
-            f"Real Pixi install, Pi startup, /models registration and agents/ discovery: OK. Log: {logpath}"
+            "Real environment, Pi startup inside bubblewrap, /models registration and "
+            f".agents/skills discovery: OK. Log: {logpath}"
         )
 
 

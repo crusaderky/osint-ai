@@ -1,7 +1,7 @@
 # Developer guide
 
-The [README](../README.md) is the end-user quick start. Keep implementation,
-packaging, and troubleshooting details here rather than in that guide.
+The [README](../README.md) is the absolute-beginner guide. Keep implementation,
+packaging and troubleshooting details here rather than in that guide.
 
 Related documentation:
 
@@ -9,23 +9,49 @@ Related documentation:
 - [Tests and Windows release checklist](testing.md)
 - [Copied components and upstream provenance](upstream.md)
 
+## Two checkouts, two jobs
+
+| Directory | Who works there | What lives there |
+| --- | --- | --- |
+| Project root (this checkout) | Maintainer. Start Pi here for code work. | Git, `pixi.toml`, `pixi.lock`, `wsl/`, `pixi-recipes/`, `tests/`, `docs/`, `README.md`, `AGENTS.md` |
+| `workspace/` | Compliance officer, through the chatbot | `AGENTS.md` (working rules) and `.agents/skills/` (user-authored skills), plus research output |
+
+On Windows the repository is checked out at `C:\Users\<name>\osint-ai`; WSL
+mounts it at `/mnt/osint-ai`. Inside the private WSL distribution a second
+checkout exists at `/home/osint/osint-ai`. That Linux checkout owns Git, Pixi
+environments and all code that executes. The Windows checkout supplies only its
+`workspace/` directory to the assistant.
+
+```text
+Linux checkout /home/osint/osint-ai  --read-only-->  /opt/osint-ai/project  (sandbox)
+Windows checkout /mnt/osint-ai/workspace --read-write--> /workspace         (sandbox, cwd)
+```
+
+Because they are separate checkouts, editing `pixi.toml` in the Windows checkout
+changes nothing that runs. The user pushes from the Windows Git GUI; the Linux
+side is updated with `update-project` (see below). Nothing is rsynced, symlinked
+or duplicated by the runtime.
+
 ## Windows installation and packaging
 
 Supported target: Windows 11 x64 with hardware virtualization and internet
-access. WSL installation may require administrator approval and a reboot.
-Local inference requires an NVIDIA GPU and Windows driver compatible with the
-bundled CUDA 13.3 runtime. Hosted providers do not require a GPU. Installation
-uses several GB for packages; model weights download separately on first use.
+access. WSL installation may require administrator approval and a reboot. Local
+inference uses a CUDA build of llama.cpp and falls back to CPU inference when no
+CUDA device answers, so a GPU is an optimisation, not a requirement. Hosted
+providers never need a GPU. Installation uses several GB for packages; model
+weights download separately on first use.
 
-Distribute `Install.cmd` and `Install.ps1` together. The bootstrap defaults to
-`https://github.com/crusaderky/osint-ai.git`, branch `main`. Publish the repository
-and installer before directing users to download them; pin a reviewed release
-for distribution rather than relying on a mutable branch.
+Distribute the `wsl/` folder (`Install.cmd` and `Install.ps1` together). The
+bootstrap defaults to `https://github.com/crusaderky/osint-ai.git`, branch
+`main`. Publish the repository and installer before directing users to download
+them; pin a reviewed release for distribution rather than relying on a mutable
+branch.
 
-Developer overrides, from PowerShell:
+Developer overrides, from PowerShell inside the `wsl` folder:
 
 ```powershell
-.\Install.ps1 -RepositoryUrl https://github.com/YOUR-ORG/osint-ai.git -Ref YOUR-TAG -ProjectPath C:\Users\Alice\osint-ai
+.\Install.ps1 -RepositoryUrl https://github.com/YOUR-ORG/osint-ai.git -Ref YOUR-TAG `
+    -ProjectPath C:\Users\Alice\osint-ai -LinuxProjectPath /home/osint/osint-ai
 ```
 
 The bootstrap expects a public repository. For a private repository, first clone
@@ -34,63 +60,102 @@ GitHub credentials are not copied into the agent sandbox.
 
 The installer:
 
-- Creates a dedicated `osint-ai` WSL distribution, leaving existing distributions
-  unchanged, and a Windows checkout at `%USERPROFILE%\osint-ai` by default.
-- Verifies pinned Ubuntu and Pixi downloads and never resets an existing checkout.
-- Refuses to reuse an unrelated distribution named `osint-ai`.
-- Creates **OSINT AI Terminal** and **OSINT AI Files** desktop shortcuts.
-- Preserves user state on a completed-install rerun; it does not update the trusted
-  runtime. There is no automatic updater in this skeleton.
+- Creates a dedicated `osint-ai` WSL distribution, leaving existing
+  distributions unchanged, plus the Windows checkout.
+- Verifies pinned Ubuntu and Pixi downloads and never resets an existing
+  checkout; it never pulls, discards or deletes user content.
+- Clones the Linux checkout and installs the `agents` environment inside it.
+- Provisions root-owned launchers, the boot mount helper, the AppArmor bwrap
+  profile and an inference runtime snapshot.
+- Reuses an existing MobaXterm installation or downloads the pinned, checksum
+  verified portable build (`-SkipMobaXterm` disables the download). MobaXterm is
+  third-party freeware under its own licence: check it before redistributing the
+  installation package.
+- Creates desktop shortcuts: **OSINT AI Terminal** (MobaXterm tab, runs
+  `pixi r restart-server && pixi r osint-pi-wsl` in the Linux checkout),
+  **OSINT AI Terminal (basic)** (plain `wsl.exe` console) and
+  **OSINT AI Files** (Windows checkout).
+- Preserves user state on a completed-install rerun; it does not update the
+  trusted runtime. There is no automatic updater in this skeleton.
 
-`pixi r install` is a user-level installation check **after** Windows provisioning.
-It does not elevate or execute root commands from the checkout. Do not run Pixi
-on an unmounted `/mnt/c/...` checkout before setup: it could install Linux
-packages onto NTFS instead of the intended Linux-backed `.pixi`.
+`pixi r install` is an installation check **after** Windows provisioning. It
+does not elevate or execute root commands from the checkout.
 
 ## Filesystem and process layout
 
 | Location | Purpose |
 | --- | --- |
-| Windows checkout | All tracked files, including `agents/`, `AGENTS.md`, manifests, recipes, and `.git` |
-| `/workspace` | WSL view of that same Windows checkout |
-| `/var/lib/osint-ai/pixi` | Linux ext4 storage mounted over `/workspace/.pixi` before Pixi runs |
-| `/var/lib/osint-ai/agent-home` | Persistent sandbox home, including Pi credentials, sessions, settings, and caches |
-| `/opt/osint-ai/server` | Protected installed inference runtime and `models.ini` snapshot |
+| Windows checkout | Everything the user commits: `workspace/AGENTS.md`, `workspace/.agents/skills/`, reports |
+| `/mnt/osint-ai` | That checkout, bind-mounted from DrvFS by the root-owned boot hook |
+| `/home/osint/osint-ai` | Linux checkout: Git, `pixi.toml`, `.pixi`, code that runs |
+| `/opt/osint-ai/project` | The Linux checkout inside the sandbox, read-only |
+| `/workspace` | `/mnt/osint-ai/workspace` inside the sandbox, read-write; Pi's working directory |
+| `/var/lib/osint-ai/agent-home` | Persistent sandbox home: Pi credentials, sessions, settings, caches |
+| `/var/lib/osint-ai/git-status` | Launcher-written Git summary exposed read-only at `/run/git-status` |
+| `/opt/osint-ai/server` | Root-owned inference runtime and `models.ini` snapshot |
 | `/var/lib/osint-ai/models` | Downloaded model cache |
 | `/var/lib/osint-ai/server-state/llama-server.log` | Inference server log |
 
-There is one Git checkout: no duplicate skills, file synchronization, detached
-Pixi environments, or Linux symlink stored in the Windows checkout.
-
-`osint-pi` enters bubblewrap **before** Pixi reads the editable manifest. Activation
-hooks, package builds, extensions, and shell commands execute inside containment.
-The agent can write project content and its own Linux state. OS tools are
-read-only; other Windows drives, host homes, WSL interop sockets, GPU devices,
-and actual `.git` contents are not exposed. Networking remains enabled.
+The sandbox never sees a `.git` directory, the Windows drive root, other drives,
+host homes, WSL interop sockets or GPU devices. Networking stays enabled.
+`osint-pi` (plain Linux) and `osint-pi-wsl` (Windows workspace) are the same
+launcher with a different workspace source; both enter bubblewrap before Pi
+starts, and both mount the environment that supplies Pi read-only.
 
 Installed launchers and the boot helper are root-owned. Their tracked originals
-(`scripts/`, `pixi-recipes/`, `Install.*`) are read-only during skill authoring.
-See the [security guide](security.md) for enforcement details, limitations, and
-Windows filesystem cases that still require validation.
+(`wsl/`, `pixi-recipes/`, `wsl/Install.*`) are inside the read-only project
+mount inside the sandbox. See [security.md](security.md) for enforcement details
+and the limits that still need Windows validation.
+
+## Tasks
+
+| Task | Effect |
+| --- | --- |
+| `pixi r osint-pi` | Assistant in `workspace/` of the current (Linux) checkout |
+| `pixi r osint-pi-wsl` | Assistant in `workspace/` of the Windows checkout |
+| `pixi r install` | Installation check and usage summary |
+| `pixi r start-server` / `stop-server` / `restart-server` | Local inference outside the sandbox, GPU with automatic CPU fallback |
+| `pixi r update-project` | Trusted maintenance: `git pull --ff-only` then `pixi install --locked -e agents` |
+| `pixi r test` | Python test suite |
+
+The launcher tasks are thin wrappers: they `exec` the root-owned launcher in
+`/usr/local/bin` when it is installed, and otherwise the checkout copy. The
+outer Pixi process therefore only reads the manifest of the checkout it runs
+from — never anything the sandboxed agent could have modified. `update-project`
+and the Windows installer are deliberate, human-run operations: they execute
+repository content with normal user rights. Never wire them into startup or into
+the sandbox.
+
+Inside WSL these commands are also installed as `osint-pi`, `osint-pi-wsl`,
+`osint-terminal`, `start-server`, `stop-server`, `restart-server` and
+`update-project`. `osint-terminal` is what the desktop shortcut runs.
 
 ## Skills and dependency changes
 
-Pi explicitly discovers `/workspace/agents`. Root `AGENTS.md` tells the chatbot
-to write skills there, not into WSL home or Pi's conventional skill directories.
-User-authored skills have the layout `agents/<skill-name>/SKILL.md`, with helper
-scripts and references beneath the same directory. `/reload` discovers changes.
+Pi discovers skills from `--skill /workspace/.agents/skills` (passed by
+`wsl/scripts/pi-entry.sh`) and from `pixi-recipes/pi-home/settings.json`. Skills
+are `<skill-name>/SKILL.md` with `scripts/`, `references/` and `assets/` beneath
+the same folder. `/reload` picks up changes. Bundled skills:
+`spreadsheet-reader` (`.xls`/`.xlsx`/`.xlsb`/CSV through pandas) and
+`markdown-pdf` (Markdown to PDF with pandoc + WeasyPrint, PDF text back into
+Markdown).
 
-`AGENTS.md`, `pixi.toml`, and `pixi.lock` remain agent-editable. Inside the sandbox:
+The environment on the sandbox `PATH` is
+`/opt/osint-ai/project/.pixi/envs/agents/bin`, mounted read-only. A functional
+agent can use tools but cannot install them, which is the point: dependency
+changes are maintainer work in a project root checkout.
 
 ```bash
-pixi add <conda-package>
-pixi add --pypi <package>
-pixi run python ...
+pixi add <conda-package>          # or: pixi add --pypi <package>
+pixi lock
+pixi install -e agents
+pixi r test
 ```
 
-The default tools environment is separate from the running `agents` environment.
-Restarting Pi applies updated agent dependencies. Humans review and publish
-changes using a Windows Git GUI; the chatbot does not control Git metadata.
+Commit `pixi.toml` and `pixi.lock` together, then have each WSL installation run
+`update-project`. Users review and publish with a Windows Git GUI; the chatbot
+does not control Git metadata at all, only reads the launcher-written summary at
+`/run/git-status` so it can remind the user.
 
 ## Providers and local inference
 
@@ -104,17 +169,20 @@ and sessions persist in private Linux application state, never the checkout.
 login does not authorize every web-search service. Provider accounts and billing
 are separate from this software.
 
-`start-server` launches CUDA inference outside bubblewrap as an ordinary Linux
-user, listening on WSL loopback at `127.0.0.1:8080`. It uses a protected runtime
-and preset snapshot, not agent-editable activation hooks or binaries. Changes
-to checkout inference recipes or `models.ini` require a maintainer-reviewed
-runtime reinstall; daily startup does not apply them automatically.
+`start-server` launches inference outside bubblewrap as the ordinary Linux user,
+listening on `127.0.0.1:8080`. It uses a protected runtime and preset snapshot,
+not agent-editable activation hooks or binaries. Device detection selects the
+GPU when a CUDA device answers `--list-devices`, and otherwise starts the same
+build on the CPU with GPU offloading disabled, recording the backend in
+`/var/lib/osint-ai/server-state/server.json`. Changes to checkout inference
+recipes or `models.ini` require a maintainer-reviewed runtime reinstall; daily
+startup does not apply them automatically.
 
-`pi-llama-cpp` supplies the plural `/models` command for browsing, loading, and
+`pi-llama-cpp` supplies the plural `/models` command for browsing, loading and
 switching local models. Starting the server downloads no weights; selecting a
-model triggers loading and any required download. Pi displays progress. Review
-presets against supported hardware: appearing in the list does not imply a model
-fits the user's GPU or RAM. `stop-server` stops inference but retains cached models.
+model triggers loading and any required download. Review presets against
+supported hardware: appearing in the list does not imply a model fits the user's
+GPU, RAM or patience. `stop-server` stops inference but retains cached models.
 
 WSL uses the Windows NVIDIA driver. Do not install a Linux NVIDIA kernel driver.
 The agent itself needs no GPU device access.
@@ -124,11 +192,11 @@ The agent itself needs no GPU device access.
 Run automated tests inside Linux or WSL:
 
 ```bash
-python3 -m unittest discover -s tests -v
+python3 -m unittest discover -s tests -v     # or: pixi r test
 ```
 
 Linux integration tests exercise real bubblewrap where user namespaces are
-available; otherwise they report an explicit skip. See [testing.md](testing.md)
-for the full Pi smoke test, PowerShell checks, and manual Windows acceptance
-matrix. Passing Linux tests does not validate Windows installation, reboot,
-DrvFS, OAuth, or actual CUDA inference.
+available; otherwise they report an explicit skip. See
+[testing.md](testing.md) for the Pi smoke test, PowerShell checks and the manual
+Windows acceptance matrix. Passing Linux tests does not validate Windows
+installation, reboot, DrvFS, MobaXterm, OAuth or actual inference.

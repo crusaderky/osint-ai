@@ -1,0 +1,111 @@
+/* Report styling for pandoc + WeasyPrint.
+   A4, readable serif text, tables that stay inside the page, page numbers. */
+
+@page {
+  size: A4;
+  margin: 20mm 18mm 20mm 18mm;
+
+  @bottom-center {
+    content: counter(page) " / " counter(pages);
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 8pt;
+    color: #555;
+  }
+  @top-right {
+    content: string(reporttitle);
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 8pt;
+    color: #777;
+  }
+}
+
+html {
+  /* These fonts ship with the project environment (font-ttf-dejavu-sans-mono
+     and friends), so reports render even in the minimal WSL distribution.
+     System fonts such as Noto are used when the distribution provides them. */
+  font-family: "DejaVu Serif", "DejaVu Sans", "Noto Serif", serif;
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color: #111;
+}
+
+body > h1:first-child, h1.title {
+  string-set: reporttitle content();
+  color: #1a3a5c;
+}
+
+h1, h2, h3, h4 {
+  font-family: "DejaVu Sans", sans-serif;
+  color: #1a3a5c;
+  margin: 1.4em 0 0.4em;
+  page-break-after: avoid;
+}
+h1 { font-size: 17pt; }
+h2 { font-size: 13pt; }
+h3 { font-size: 11.5pt; }
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+a {
+  color: #0b5cad;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+  font-size: 9pt;
+  page-break-inside: auto;
+}
+th, td {
+  border: 0.5pt solid #b6c2cf;
+  padding: 3pt 5pt;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+th {
+  background: #eef3f8;
+  font-family: "DejaVu Sans", sans-serif;
+  text-align: left;
+}
+tr { page-break-inside: avoid; }
+
+blockquote {
+  border-left: 3pt solid #cfd8e3;
+  margin: 0.8em 0;
+  padding-left: 10pt;
+  color: #333;
+}
+
+code, pre {
+  font-family: "Source Code Pro", "DejaVu Sans", monospace;
+  font-size: 8.5pt;
+  background: #f5f6f8;
+  word-break: break-all;
+}
+pre {
+  padding: 6pt;
+  border: 0.5pt solid #dfe3e8;
+  white-space: pre-wrap;
+}
+
+img {
+  max-width: 100%;
+}
+
+/* Force a new page where the report asks for one. */
+.new-page, hr.page-break {
+  page-break-before: always;
+}
+
+footer, .footnotes {
+  font-size: 8.5pt;
+  color: #444;
+  border-top: 0.5pt solid #cfd8e3;
+  margin-top: 1.5em;
+}

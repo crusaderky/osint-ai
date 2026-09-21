@@ -1,0 +1,5 @@
+#!/bin/bash -p
+# Plain Linux mode: the functional workspace is <linux checkout>/workspace.
+set -euo pipefail
+exec env OSINT_PROJECT_ROOT="${OSINT_PROJECT_ROOT:-/home/osint/osint-ai}" \
+    /usr/local/lib/osint-ai/bwrap-pi.sh --native "$@"

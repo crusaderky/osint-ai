@@ -1,3 +1,0 @@
-#!/bin/bash -p
-set -euo pipefail
-exec /usr/local/lib/osint-ai/bwrap-pi.sh "$@"

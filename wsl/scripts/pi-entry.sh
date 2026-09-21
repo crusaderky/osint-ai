@@ -1,8 +1,8 @@
 #!/bin/bash
-# Executed by pixi ONLY after bubblewrap has established isolation.
+# Executed by the launcher ONLY after bubblewrap has established isolation.
 set -euo pipefail
 [[ "${OSINT_SANDBOX:-}" == 1 ]] || { echo 'Pi must run inside the OSINT sandbox.' >&2; exit 1; }
-: "${CONDA_PREFIX:?Pixi environment is missing}"
+: "${CONDA_PREFIX:?Pi environment is missing}"
 
 /usr/bin/python3 -I - "$CONDA_PREFIX" <<'PY'
 import json
@@ -33,12 +33,16 @@ settings_file.write_text(json.dumps(settings, indent=2) + '\n')
 os.chmod(settings_file, 0o600)
 PY
 
-# Decode argv without passing quotes, spaces, or shell metacharacters to Pixi's
-# task shell. Keep Pi's original terminal stdin, not the Python heredoc above.
+# Skills are project content, versioned in the user's checkout. Pass their
+# location explicitly so discovery does not depend on Pi's project-trust prompt.
+skills=${OSINT_SKILLS_DIR:-/workspace/.agents/skills}
+mkdir -p "$skills" 2>/dev/null || true  # an incomplete checkout must not block startup
+
+# Decode argv without passing quotes, spaces, or shell metacharacters to Pi.
+# Keep Pi's original terminal stdin, not the Python heredoc above.
 mapfile -d '' -t PI_ARGS < <(/usr/bin/python3 -I -c '
 import base64, json, os, sys
 args = json.loads(base64.b64decode(os.environ.get("OSINT_PI_ARGS", "W10=")))
 sys.stdout.buffer.write(b"".join(arg.encode() + b"\0" for arg in args))
 ')
-# agents/ is intentionally not Pi's conventional .agents/skills location.
-exec pi --skill /workspace/agents "${PI_ARGS[@]}"
+exec pi --skill "$skills" "${PI_ARGS[@]}"

@@ -1,5 +1,11 @@
 #!/usr/bin/python3 -I
-"""Root-owned WSL boot hook. No shell evaluation or code from the checkout."""
+"""Root-owned WSL boot hook. No shell evaluation or code from the checkout.
+
+Mounts the *Windows* checkout of this repository at ``/mnt/osint-ai`` so that
+``osint-pi-wsl`` can expose its ``workspace/`` directory to the agent. The
+Linux checkout that owns Git, Pixi and this program lives in Linux storage and
+is never touched here.
+"""
 
 import fcntl
 import json
@@ -11,8 +17,7 @@ import tempfile
 from pathlib import Path, PureWindowsPath
 
 CONFIG = Path("/etc/osint-ai.json")
-PROJECT = Path("/workspace")
-STATE = Path("/var/lib/osint-ai")
+WINDOWS_TARGET = Path("/mnt/osint-ai")
 
 
 def run(*args):
@@ -53,7 +58,7 @@ def bind_fds(source_fd, target_fd):
     )
 
 
-def mount_windows_project(windows_path):
+def mount_windows_checkout(windows_path):
     drive, parts = windows_parts(windows_path)
     # DrvFS mounts drive roots, not reliably arbitrary subdirectories. Keep the
     # temporary whole-drive mount under a root-only directory, then discard it.
@@ -78,7 +83,7 @@ def mount_windows_project(windows_path):
                 )
                 os.close(source_fd)
                 source_fd = next_fd
-            target_fd = directory_fd(PROJECT)
+            target_fd = directory_fd(WINDOWS_TARGET)
             try:
                 bind_fds(source_fd, target_fd)
             finally:
@@ -94,40 +99,29 @@ def mount_windows_project(windows_path):
 
 
 def check():
-    if PROJECT.is_symlink() or (PROJECT / ".pixi").is_symlink():
-        raise RuntimeError("Workspace and .pixi must be real directories.")
-    if not os.path.ismount(PROJECT):
-        raise RuntimeError("Windows workspace is not mounted; restart the OSINT AI terminal.")
-    if not (PROJECT / ".pixi").exists() or not os.path.samefile(PROJECT / ".pixi", STATE / "pixi"):
-        raise RuntimeError("Linux .pixi mount is missing; restart the OSINT AI terminal.")
+    if WINDOWS_TARGET.is_symlink():
+        raise RuntimeError(f"{WINDOWS_TARGET} must be a real directory.")
+    if not os.path.ismount(WINDOWS_TARGET):
+        raise RuntimeError("Windows checkout is not mounted; restart the OSINT AI terminal.")
+    workspace = WINDOWS_TARGET / "workspace"
+    if workspace.is_symlink() or not workspace.is_dir():
+        raise RuntimeError(f"{workspace} is missing. Update the checkout in your Windows Git app.")
 
 
 def mount():
     if os.geteuid() != 0:
         raise RuntimeError("Mount setup is performed by the WSL boot hook, not by the agent.")
     config = json.loads(CONFIG.read_text())
-    windows_path = config["windows_project"]
-    windows_parts(windows_path)
-    PROJECT.mkdir(exist_ok=True)
-    if PROJECT.is_symlink():
-        raise RuntimeError("Workspace mount point is a symlink.")
-    if not os.path.ismount(PROJECT):
-        mount_windows_project(windows_path)
-    target = PROJECT / ".pixi"
-    target.mkdir(exist_ok=True)
-    source_fd = directory_fd(STATE / "pixi")
-    try:
-        target_fd = directory_fd(target)
-        try:
-            if not os.path.samestat(os.fstat(source_fd), os.fstat(target_fd)):
-                bind_fds(source_fd, target_fd)
-        finally:
-            os.close(target_fd)
-    finally:
-        os.close(source_fd)
-    restrict = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
-    if restrict.exists() and restrict.read_text().strip() == "1":
-        run("/usr/sbin/apparmor_parser", "-r", "/etc/apparmor.d/bwrap")
+    windows_parts(config["windows_project"])
+    if WINDOWS_TARGET.is_symlink():
+        raise RuntimeError(f"{WINDOWS_TARGET} is a symlink.")
+    WINDOWS_TARGET.mkdir(parents=True, exist_ok=True)
+    if not os.path.ismount(WINDOWS_TARGET):
+        mount_windows_checkout(config["windows_project"])
+    workspace = WINDOWS_TARGET / "workspace"
+    if not workspace.is_dir():
+        # An outdated checkout must not prevent the assistant from starting.
+        workspace.mkdir()
     check()
 
 

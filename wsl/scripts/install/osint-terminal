@@ -1,0 +1,12 @@
+#!/bin/bash -l
+# Desktop/terminal startup: refresh local inference, then open the chatbot.
+set -uo pipefail
+root=${OSINT_LINUX_PROJECT:-/home/osint/osint-ai}
+if [[ -r /etc/osint-ai.json ]]; then
+    root=$(/usr/bin/python3 -I -c 'import json;print(json.load(open("/etc/osint-ai.json"))["linux_project"])')
+fi
+cd "$root" || { echo "OSINT AI: missing Linux checkout: $root" >&2; exit 1; }
+pixi r restart-server && pixi r osint-pi-wsl || {
+    printf '\nStartup failed. Press Enter to close this window.\n'
+    read -r _
+}

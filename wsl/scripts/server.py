@@ -1,5 +1,10 @@
 #!/usr/bin/python3
-"""User-level CUDA server lifecycle; never executes the editable project manifest."""
+"""User-level llama.cpp server lifecycle; never executes the editable project manifest.
+
+The bundled CUDA build also runs on machines without an NVIDIA GPU: device
+detection then selects CPU inference instead of failing, so the desktop
+shortcut works on every supported PC.
+"""
 
 import fcntl
 import json
@@ -22,6 +27,8 @@ HOST = "127.0.0.1"
 PORT = 8080
 GPU_DEVICE = Path("/dev/dxg")
 STARTUP_TIMEOUT = 120
+# Keep a CUDA build on system memory when no CUDA device is present.
+CPU_ONLY_ARGS = ["--n-gpu-layers", "0"]
 
 
 def process_identity(pid):
@@ -71,11 +78,31 @@ def stop(record, pidfile):
     pidfile.unlink(missing_ok=True)
 
 
+def detect_backend(executable, env):
+    """Return (backend, extra arguments). CPU-only PCs are fully supported."""
+    if not GPU_DEVICE.exists():
+        return "cpu", CPU_ONLY_ARGS
+    devices = subprocess.run(
+        [str(executable), "--list-devices"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=STATE,
+        check=False,
+    )
+    if not devices.returncode and re.search(
+        r"(?m)^\s*CUDA\d+:", devices.stdout + devices.stderr
+    ):
+        return "cuda", []
+    return "cpu", CPU_ONLY_ARGS
+
+
 def main(action):
     if os.geteuid() == 0:
-        raise RuntimeError("Run start-server as the normal WSL user, not root.")
+        raise RuntimeError("Run the inference server as the normal user, not root.")
     if os.environ.get("OSINT_SANDBOX"):
-        raise RuntimeError("Run start-server in the WSL terminal, outside Pi.")
+        raise RuntimeError("Run start-server/restart-server in the terminal, outside Pi.")
     if not STATE.is_dir():
         raise RuntimeError("Trusted server installation is missing. Run the Windows installer.")
     with (STATE / "control.lock").open("a") as lock:
@@ -87,10 +114,14 @@ def main(action):
             print("Local inference stopped.")
             return
         if owned_process(record):
-            if not healthy():
+            if action == "restart":
+                stop(record, pidfile)
+                record = {}
+            elif not healthy():
                 raise RuntimeError("Existing server is not healthy. Run stop-server and retry.")
-            print("Local inference is already running. Use /models inside Pi.")
-            return
+            else:
+                print("Local inference is already running. Use /models inside Pi.")
+                return
         # Never mistake an arbitrary HTTP listener for our inference server.
         with socket.socket() as probe:
             # Permit immediate restart despite TCP TIME_WAIT, like llama-server.
@@ -99,13 +130,9 @@ def main(action):
                 probe.bind((HOST, PORT))
             except OSError as error:
                 raise RuntimeError("Port 8080 is in use by another process.") from error
-        if not GPU_DEVICE.exists():
-            raise RuntimeError(
-                "WSL GPU access is unavailable. Install a supported NVIDIA Windows driver."
-            )
         executable = RUNTIME / "bin/llama-server"
         if not executable.is_file():
-            raise RuntimeError("CUDA runtime is missing. Complete the Windows installation.")
+            raise RuntimeError("Inference runtime is missing. Complete the installation.")
         env = {
             "HOME": "/home/osint",
             "LANG": "C.UTF-8",
@@ -114,25 +141,17 @@ def main(action):
             "XDG_CACHE_HOME": str(MODELS),
             "LLAMA_CACHE": str(MODELS / "llama.cpp"),
         }
-        devices = subprocess.run(
-            [str(executable), "--list-devices"],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=STATE,
-            check=False,
-        )
-        if devices.returncode or not re.search(
-            r"(?m)^\s*CUDA\d+:", devices.stdout + devices.stderr
-        ):
-            raise RuntimeError(
-                "No usable CUDA device. Check GPU/driver compatibility with CUDA 13.3.\n"
-                + devices.stdout
-                + devices.stderr
-            )
+        backend, backend_args = detect_backend(executable, env)
         logfile = STATE / "llama-server.log"
-        print(f"Starting local CUDA server. Log: {logfile}", flush=True)
+        if backend == "cuda":
+            print("CUDA device detected. Starting local inference on the GPU.", flush=True)
+        else:
+            print(
+                "No usable CUDA device. Starting local inference on the CPU, which is much "
+                "slower. Install a supported NVIDIA Windows driver to use the GPU.",
+                flush=True,
+            )
+        print(f"Local inference server log: {logfile}", flush=True)
         with logfile.open("ab", buffering=0) as log:
             # The controller is single-threaded. fork/exec detaches the server
             # without a Popen object or platform-specific posix_spawn flags.
@@ -147,6 +166,8 @@ def main(action):
                 HOST,
                 "--port",
                 str(PORT),
+                # Appended last so it overrides any GPU-layer preset.
+                *backend_args,
             ]
             pid = os.fork()
             if pid == 0:
@@ -161,7 +182,7 @@ def main(action):
                 except BaseException as error:
                     os.write(2, f"Cannot launch inference: {error}\n".encode())
                     os._exit(127)
-        record = {"pid": pid, "start": process_identity(pid)}
+        record = {"pid": pid, "start": process_identity(pid), "backend": backend}
         try:
             pidfile.write_text(json.dumps(record))
             deadline = time.monotonic() + STARTUP_TIMEOUT
@@ -186,8 +207,8 @@ def main(action):
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) != 2 or sys.argv[1] not in {"start", "stop"}:
-            raise RuntimeError("Usage: start-server | stop-server")
+        if len(sys.argv) != 2 or sys.argv[1] not in {"start", "stop", "restart"}:
+            raise RuntimeError("Usage: start-server | stop-server | restart-server")
         main(sys.argv[1])
     except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
         sys.exit(f"OSINT AI: {error}")

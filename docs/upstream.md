@@ -5,20 +5,43 @@ Adapted from the adjacent `pixi-llm-recipes` checkout supplied for this task:
 - `models.ini`: copied unchanged, including large/experimental presets. Runtime
   capacity is not guaranteed; weights load only on explicit model selection.
 - `llamacpp-binary-cuda`: retained Anbeeld/beellama.cpp v0.4.6 and CUDA 13.3.
-  Reduced binary recipe to linux-64 CUDA; download moved to checksum-verified
-  rattler-build source. No CPU/Vulkan/ROCm or Windows-native binary paths.
+  Reduced the binary recipe to linux-64 CUDA and moved the download to a
+  checksum-verified rattler-build source. No CPU/Vulkan/ROCm or Windows-native
+  binary paths. The server starts this build on the CPU when no CUDA device is
+  present.
 - `pi`: conda-forge pi-coding-agent 0.85.1; Linux only.
 - `pi-extensions`: retained pinned pi-llama-cpp, pi-web-access, pi-token-speed,
   and ask-user-question. Dropped developer-only btw/caveman/usage extensions and
-  rtk command rewriting. Shell and Windows-specific build variants removed.
-- `pi-home`: retained package structure, keybindings and web-search config;
-  replaced global guidance with project-local skill instructions and added local
-  llama server defaults. Removed use-gh-cli skill because Git belongs to Windows.
-- `bwrap-pi.sh`: replaced blanket root bind with explicit allowlist, added ext4
-  storage validation, removed Git credential sharing and skill rsync-back. Moved
-  containment before Pixi activation so writable manifests remain safe to use.
-- `pixi r install`: simplified to installed-launcher checks and usage guidance;
-  first-time privileged setup lives in Windows bootstrap/WSL provisioning.
+  rtk command rewriting. Removed shell and Windows-specific build variants.
+- `pi-home`: retained the package structure, keybindings and web-search config;
+  replaced global guidance with the functional workspace's instructions and added
+  local llama server defaults. Skills are discovered at
+  `/workspace/.agents/skills`. Removed the `use-gh-cli` skill because Git belongs
+  to Windows.
+- `bwrap-pi.sh` / `sandbox.py`: replaced the blanket root bind with an explicit
+  allowlist, added Linux-filesystem validation, removed Git credential sharing
+  and skill rsync-back, and moved containment before Pi starts. Supports the two
+  deployment modes: the workspace of the current checkout, or the workspace of
+  the Windows checkout mounted at `/mnt/osint-ai`.
+- `pixi r install`: simplified to installation checks and usage guidance;
+  first-time privileged setup lives in the Windows bootstrap/WSL provisioning.
 
-Third-party package licenses continue to apply. Release packaging must include
-required notices for Ubuntu, Pixi, bubblewrap, Pi, extensions and llama.cpp.
+## Third-party licences
+
+Third-party package licences continue to apply and must be listed in release
+packaging: Ubuntu base (Ubuntu licences), Pixi (MIT), bubblewrap
+(LGPL-2.1-or-later), Pi and extensions (MIT), llama.cpp (MIT), Python
+(Python-2.0), pandas (BSD-3), openpyxl (MIT), xlrd (BSD-3/BSD-4), pyxlsb
+(LGPL-3.0-or-later), pandoc (GPL-2.0-or-later), poppler (GPL-2.0-or-later),
+WeasyPrint (BSD-3), DejaVu/Source/Ubuntu fonts (BSD-3 and Ubuntu Font Licence).
+
+Bundled report and spreadsheet tooling is invoked as separate commands from the
+project environment; releasing the installer keeps those components under their
+own licences, which requires shipping or offering their source as each licence
+requires.
+
+**MobaXterm is not bundled.** The installer reuses an existing installation or
+downloads the pinned portable build from mobaxterm.mobatek.net on the user's own
+machine; MobaXterm's own licence (free for personal use, paid for commercial
+use) applies and must be checked before a commercial rollout. It is outside the
+sandbox trust boundary.

@@ -2,6 +2,7 @@ import base64
 import importlib.util
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -13,10 +14,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "wsl" / "scripts"
 
 
 def load_module(name):
-    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -26,6 +28,8 @@ sandbox = load_module("sandbox")
 server = load_module("server")
 mounts = load_module("mount-workspace")
 
+SKILLS_PATH = "/workspace/.agents/skills"
+
 
 class ConfigurationTests(unittest.TestCase):
     def test_manifest(self):
@@ -34,26 +38,110 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(data["feature"]["pi"]["dependencies"]["pi-coding-agent"], "=0.85.1")
         self.assertEqual(data["environments"]["agents"], ["pi"])
         self.assertTrue(data["environments"]["llamacpp-binary-cuda"]["no-default-feature"])
-        self.assertIn("python", data["dependencies"])
+
+    def test_manifest_tools_and_tasks(self):
+        data = tomllib.loads((ROOT / "pixi.toml").read_text())
+        for package in (
+            "python",
+            "pandas",  # spreadsheet analysis
+            "xlrd",  # legacy .xls
+            "openpyxl",  # .xlsx
+            "pyxlsb",  # .xlsb
+            "pandoc",  # Markdown authoring
+            "weasyprint",  # Markdown -> PDF engine
+            "poppler",  # PDF -> text
+        ):
+            self.assertIn(package, data["dependencies"])
+        tasks = data["tasks"]
+        self.assertEqual(tasks["osint-pi"], "bash wsl/scripts/launch-pi.sh native")
+        self.assertEqual(tasks["osint-pi-wsl"], "bash wsl/scripts/launch-pi.sh wsl")
+        self.assertEqual(
+            tasks["restart-server"], "bash wsl/scripts/launch-server.sh restart"
+        )
+        for task in ("install", "start-server", "stop-server", "update-project", "test"):
+            self.assertIn(task, tasks)
+        # Every referenced script exists.
+        for task, command in tasks.items():
+            match = re.search(r"(wsl/scripts/[\w.-]+)", command)
+            if match:
+                self.assertTrue((ROOT / match.group(1)).is_file(), task)
 
     def test_skill_discovery_and_guidance(self):
         settings = json.loads((ROOT / "pixi-recipes/pi-home/settings.json").read_text())
-        self.assertEqual(settings["skills"], ["/workspace/agents"])
+        self.assertEqual(settings["skills"], [SKILLS_PATH])
         self.assertEqual(settings["llamaSettings"]["servers"][0]["url"], "http://127.0.0.1:8080")
-        for file in ("AGENTS.md", "pixi-recipes/pi-home/AGENTS.md"):
-            self.assertIn("/workspace/agents/<skill-name>/SKILL.md", (ROOT / file).read_text())
-        self.assertIn(
-            "exec pi --skill /workspace/agents", (ROOT / "scripts/pi-entry.sh").read_text()
-        )
+        entry = (SCRIPTS / "pi-entry.sh").read_text()
+        self.assertIn(f'exec pi --skill "$skills"', entry)
+        self.assertIn(f"OSINT_SKILLS_DIR:-{SKILLS_PATH}", entry)
+        for guidance, expected in [
+            ("workspace/AGENTS.md", f"{SKILLS_PATH}/<skill-name>/SKILL.md"),
+            ("pixi-recipes/pi-home/AGENTS.md", f"{SKILLS_PATH}/<skill-name>/SKILL.md"),
+            ("AGENTS.md", "workspace/.agents/skills"),
+        ]:
+            self.assertIn(expected, (ROOT / guidance).read_text())
+        # The workspace guide forbids the conventional but unreviewable locations.
+        workspace_guide = (ROOT / "workspace/AGENTS.md").read_text()
+        for forbidden in ("~/.pi", "~/.agents", ".pi/skills"):
+            self.assertIn(forbidden, workspace_guide)
+        # Reminders about uncommitted work are documented where the agent reads them.
+        self.assertIn("/run/git-status", workspace_guide)
+        self.assertIn("/run/git-status", (ROOT / "pixi-recipes/pi-home/AGENTS.md").read_text())
+
+    def test_bundled_skills_are_valid(self):
+        skills = ROOT / "workspace/.agents/skills"
+        names = sorted(path.parent.name for path in skills.glob("*/SKILL.md"))
+        self.assertIn("spreadsheet-reader", names)
+        self.assertIn("markdown-pdf", names)
+        for name in names:
+            text = (skills / name / "SKILL.md").read_text()
+            frontmatter = re.match(r"---\n(.*?)\n---\n", text, re.S)
+            self.assertIsNotNone(frontmatter, name)
+            fields = dict(
+                line.split(":", 1) for line in frontmatter.group(1).splitlines() if ":" in line
+            )
+            self.assertEqual(fields.get("name", "").strip(), name)
+            self.assertGreater(len(fields.get("description", "").strip()), 40, name)
+        # Both documented workflows point at helpers that exist.
+        reader = (skills / "spreadsheet-reader/SKILL.md").read_text()
+        self.assertIn("scripts/sheet.py", reader)
+        self.assertTrue((skills / "spreadsheet-reader/scripts/sheet.py").is_file())
+        report = (skills / "markdown-pdf/SKILL.md").read_text()
+        self.assertIn("scripts/build-pdf.sh", report)
+        self.assertIn("pdftotext", report)
+        self.assertTrue((skills / "markdown-pdf/scripts/build-pdf.sh").is_file())
+        self.assertTrue((skills / "markdown-pdf/assets/report.css").is_file())
+
+    def test_beginner_readme_covers_the_basics(self):
+        readme = (ROOT / "README.md").read_text()
+        for needle in (
+            "github.com/signup",
+            "desktop.github.com",
+            "Commit",
+            "Push",
+            "Pull",
+            "openrouter.ai",
+            "/login",
+            "/scoped-models",
+            "/model",
+            "/thinking",
+            "/new",
+            "/resume",
+            "/tree",
+            "AGENTS.md",
+            "skill",
+        ):
+            self.assertIn(needle, readme, needle)
+        # Deliberately not taught to beginners: branches and pull requests.
+        self.assertNotIn("git branch", readme.lower())
+        self.assertNotIn("pull request", readme.lower())
 
     def test_shell_syntax(self):
-        for file in [*ROOT.rglob("*.sh"), *(ROOT / "scripts/install").iterdir()]:
-            if ".pixi" not in file.parts:
-                with self.subTest(file=file):
-                    subprocess.run(["/bin/bash", "-n", str(file)], check=True)
+        for file in [*SCRIPTS.rglob("*.sh"), *(SCRIPTS / "install").iterdir()]:
+            with self.subTest(file=file):
+                subprocess.run(["/bin/bash", "-n", str(file)], check=True)
 
     def test_windows_bootstrap_is_non_destructive(self):
-        script = (ROOT / "Install.ps1").read_text()
+        script = (ROOT / "wsl/Install.ps1").read_text()
         self.assertNotIn("--unregister", script)
         self.assertNotIn("reset --hard", script)
         self.assertNotIn("git pull", script)
@@ -61,6 +149,11 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("Get-FileHash", script)
         self.assertIn("Restart Windows", script)
         self.assertIn("ConvertTo-ShellLiteral", script)
+        # Third-party terminal: pinned, checksummed, optional, and never bundled.
+        self.assertIn("$MobaXtermSha256", script)
+        self.assertIn("$SkipMobaXterm", script)
+        self.assertIn("/usr/local/bin/osint-terminal", script)
+        self.assertIn("/mnt/osint-ai/wsl/scripts/provision-wsl.sh", script)
 
 
 class MountTests(unittest.TestCase):
@@ -87,8 +180,8 @@ class MountTests(unittest.TestCase):
             root = Path(directory)
             temporary = root / "private"
             temporary.mkdir(mode=0o700)
-            project = root / "workspace"
-            project.mkdir()
+            target = root / "mnt-osint-ai"
+            target.mkdir()
             calls = []
             mounted = False
 
@@ -109,16 +202,16 @@ class MountTests(unittest.TestCase):
                     os.fstat(source_fd).st_ino,
                     (temporary / "drive/Users/Alice/Skills").stat().st_ino,
                 )
-                self.assertEqual(os.fstat(target_fd).st_ino, project.stat().st_ino)
+                self.assertEqual(os.fstat(target_fd).st_ino, target.stat().st_ino)
 
             with (
-                patch.object(mounts, "PROJECT", project),
+                patch.object(mounts, "WINDOWS_TARGET", target),
                 patch.object(mounts.tempfile, "mkdtemp", return_value=str(temporary)),
                 patch.object(mounts, "run", side_effect=run),
                 patch.object(mounts, "bind_fds", side_effect=bind) as bind_mock,
                 patch.object(mounts.os.path, "ismount", side_effect=lambda _: mounted),
             ):
-                mounts.mount_windows_project(r"C:\Users\Alice\Skills")
+                mounts.mount_windows_checkout(r"C:\Users\Alice\Skills")
             bind_mock.assert_called_once()
             self.assertEqual(calls[-1][0], "/usr/bin/umount")
             self.assertFalse(temporary.exists())
@@ -138,8 +231,9 @@ class PiEntryTests(unittest.TestCase):
             (bundled / "npm").mkdir(parents=True)
             for name in ("settings.json", "osint-defaults.json", "keybindings.json"):
                 (bundled / name).write_text("{}")
-            (bundled / "AGENTS.md").write_text("use /workspace/agents")
+            (bundled / "AGENTS.md").write_text("use /workspace/.agents/skills")
             (bundled.parent / "web-search.json").write_text("{}")
+            skills = root / "workspace-skills"
             bindir = root / "bin"
             bindir.mkdir()
             fake = bindir / "pi"
@@ -160,10 +254,11 @@ class PiEntryTests(unittest.TestCase):
                 CONDA_PREFIX=str(prefix),
                 PATH=str(bindir) + ":/usr/bin:/bin",
                 OSINT_SANDBOX="1",
+                OSINT_SKILLS_DIR=str(skills),
                 OSINT_PI_ARGS=base64.b64encode(json.dumps(prompts).encode()).decode(),
             )
             result = subprocess.run(
-                ["/bin/bash", str(ROOT / "scripts/pi-entry.sh")],
+                ["/bin/bash", str(SCRIPTS / "pi-entry.sh")],
                 input="terminal input",
                 capture_output=True,
                 text=True,
@@ -171,7 +266,8 @@ class PiEntryTests(unittest.TestCase):
                 check=True,
             )
             args, stdin = json.loads(result.stdout)
-            self.assertEqual(args, ["--skill", "/workspace/agents", *prompts])
+            self.assertEqual(args, ["--skill", str(skills), *prompts])
+            self.assertTrue(skills.is_dir(), "the skills directory is created if missing")
             self.assertEqual(stdin, "terminal input")
             self.assertEqual(
                 json.loads((live / "settings.json").read_text())["defaultProvider"], "openrouter"
@@ -180,30 +276,55 @@ class PiEntryTests(unittest.TestCase):
                 json.loads((live / "auth.json").read_text()), {"preserve": "user login"}
             )
 
+    def test_entry_refuses_to_run_unsandboxed(self):
+        env = {key: value for key, value in os.environ.items() if key != "OSINT_SANDBOX"}
+        result = subprocess.run(
+            ["/bin/bash", str(SCRIPTS / "pi-entry.sh")],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sandbox", result.stderr.lower())
+
 
 class SandboxFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="osint test ' spaces ")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.project = self.root / "windows checkout"
+        self.project = self.root / "linux checkout"
+        self.workspace = self.project / "workspace"
         self.state = self.root / "linux state"
-        self.project.mkdir()
-        self.state.mkdir()
-        for name in (".git", ".pixi", "agents", "scripts", "pixi-recipes"):
-            (self.project / name).mkdir()
-        for name in ("agent-home", "pixi"):
-            (self.state / name).mkdir()
+        (self.project / ".git").mkdir(parents=True)
+        (self.project / ".pixi/envs/agents/bin").mkdir(parents=True)
+        (self.project / ".pixi/envs/agents/bin/pi").write_text("#!/bin/sh\n")
+        (self.workspace / ".agents/skills").mkdir(parents=True)
+        (self.project / "wsl/scripts").mkdir(parents=True)
+        (self.state / "agent-home").mkdir(parents=True)
         (self.project / ".git/config").write_text("private git configuration")
-        (self.project / "scripts/protected").write_text("original")
-        (self.project / "AGENTS.md").write_text("project instructions")
+        (self.project / "wsl/scripts/protected").write_text("original")
         (self.project / "pixi.toml").write_text("project manifest")
+        (self.workspace / "AGENTS.md").write_text("workspace instructions")
         self.secret = self.root / "host-secret"
         self.secret.write_text("not accessible")
+        patcher = patch.object(sandbox, "filesystem", return_value="ext4")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def argv(self, command):
-        return sandbox.build_command(self.project, self.state, command)
+    def argv(self, command=None, *, workspace=None, mode="native", **kwargs):
+        return sandbox.build_command(
+            self.project,
+            self.workspace if workspace is None else workspace,
+            self.state,
+            mode=mode,
+            command=command,
+            **kwargs,
+        )
 
+
+class SandboxArgumentTests(SandboxFixture):
     def test_argv_and_environment_allowlist(self):
         with patch.dict(os.environ, {"WSL_INTEROP": "/run/socket", "OPENAI_API_KEY": "secret"}):
             args = self.argv(["/bin/printf", "%s", "a'b $HOME; literal argument"])
@@ -215,18 +336,92 @@ class SandboxFixture(unittest.TestCase):
         self.assertNotIn("secret", args)
         self.assertNotIn("/", args)
         self.assertNotIn("--dev-bind", args)
-        self.assertIn(str(self.project), args)
-        self.assertIn(str(self.state / "pixi"), args)
+        # The project root is read-only; only the workspace is writable.
+        self.assertIn(
+            (str(self.project), "/opt/osint-ai/project"),
+            [(args[i + 1], args[i + 2]) for i, a in enumerate(args) if a == "--ro-bind"],
+        )
+        self.assertIn(
+            (str(self.workspace), "/workspace"),
+            [(args[i + 1], args[i + 2]) for i, a in enumerate(args) if a == "--bind"],
+        )
+        self.assertEqual(args[args.index("--chdir") + 1], "/workspace")
 
-    def test_unmounted_storage_rejected(self):
-        with self.assertRaisesRegex(RuntimeError, "mount is missing"):
-            sandbox.check_storage(self.project, self.state)
+    def test_environment_points_at_read_only_tools(self):
+        args = self.argv()
+        env = {args[i + 1]: args[i + 2] for i, a in enumerate(args) if a == "--setenv"}
+        self.assertEqual(env["CONDA_PREFIX"], "/opt/osint-ai/project/.pixi/envs/agents")
+        self.assertTrue(env["PATH"].startswith("/opt/osint-ai/project/.pixi/envs/agents/bin:"))
+        self.assertEqual(env["HOME"], "/home/osint")
+        self.assertEqual(env["OSINT_SANDBOX"], "1")
+        self.assertEqual(json.loads(base64.b64decode(env["OSINT_PI_ARGS"])), [])
+
+    def test_wsl_mode_swaps_the_workspace_only(self):
+        windows = self.root / "mnt-osint-ai/workspace"
+        windows.mkdir(parents=True)
+        native = self.argv()
+        wsl = self.argv(workspace=windows, mode="wsl")
+        self.assertIn(
+            (str(windows), "/workspace"),
+            [(wsl[i + 1], wsl[i + 2]) for i, a in enumerate(wsl) if a == "--bind"],
+        )
+        self.assertNotIn(str(self.workspace), wsl)
+        # Everything else is identical: same read-only code, same entry point.
+        self.assertIn("/opt/osint-ai/project", native)
+        self.assertEqual(native[native.index("--chdir") :], wsl[wsl.index("--chdir") :])
+
+    def test_entry_prefers_installed_copy(self):
+        with patch("pathlib.Path.is_file", return_value=True):
+            args = self.argv()
+        self.assertEqual(args[-2:], ["/bin/bash", "/usr/local/lib/osint-ai/pi-entry.sh"])
+        # Without a root-owned installation, the (developer-editable) checkout copy.
+        self.assertEqual(
+            self.argv()[-2:],
+            ["/bin/bash", "/opt/osint-ai/project/wsl/scripts/pi-entry.sh"],
+        )
 
     def test_protected_symlink_rejected(self):
-        shutil.rmtree(self.project / "scripts")
-        (self.project / "scripts").symlink_to(self.root, target_is_directory=True)
+        shutil.rmtree(self.workspace)
+        self.workspace.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaisesRegex(RuntimeError, "symlink"):
+            sandbox.check_storage("native", self.project, self.workspace, self.state)
+        # The launcher never builds a namespace for it either.
         with self.assertRaisesRegex(RuntimeError, "symlink"):
             self.argv(["/bin/true"])
+
+    def test_workspace_must_not_be_the_project_root(self):
+        with self.assertRaisesRegex(RuntimeError, "subdirectory"):
+            sandbox.check_storage("native", self.project, self.project, self.state)
+
+    def test_missing_environment_is_reported(self):
+        (self.project / ".pixi/envs/agents/bin/pi").unlink()
+        with self.assertRaisesRegex(RuntimeError, "environment is not installed"):
+            sandbox.check_storage("native", self.project, self.workspace, self.state)
+
+    def test_windows_filesystem_rejected(self):
+        with patch.object(sandbox, "filesystem", return_value="ntfs"):
+            with self.assertRaisesRegex(RuntimeError, "Refusing"):
+                sandbox.check_storage("native", self.project, self.workspace, self.state)
+
+    def test_wsl_mode_requires_the_windows_mount(self):
+        windows = self.root / "mnt-osint-ai/workspace"
+        windows.mkdir(parents=True)
+        with (
+            patch.object(sandbox, "WINDOWS_MOUNT", self.root / "mnt-osint-ai"),
+            patch.object(sandbox.os.path, "ismount", return_value=False),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "not mounted"):
+                sandbox.check_storage("wsl", self.project, windows, self.state)
+
+    def test_wsl_mode_accepts_the_mounted_workspace(self):
+        mount = self.root / "mnt-osint-ai"
+        windows = mount / "workspace"
+        windows.mkdir(parents=True)
+        with (
+            patch.object(sandbox, "WINDOWS_MOUNT", mount),
+            patch.object(sandbox.os.path, "ismount", return_value=True),
+        ):
+            sandbox.check_storage("wsl", self.project, windows, self.state)
 
     def test_worktree_git_file_rejected(self):
         shutil.rmtree(self.project / ".git")
@@ -236,33 +431,102 @@ class SandboxFixture(unittest.TestCase):
 
     def test_mount_helper_rejects_symlink(self):
         link = self.root / "link"
-        link.symlink_to(self.state / "pixi", target_is_directory=True)
+        link.symlink_to(self.state / "agent-home", target_is_directory=True)
         with self.assertRaises(OSError):
             mounts.directory_fd(link)
 
+    def test_launcher_wrappers_exec_trusted_commands(self):
+        script = (SCRIPTS / "launch-pi.sh").read_text()
+        self.assertIn("/usr/local/bin/osint-pi-wsl", script)
+        self.assertIn("sandbox.py", script)
+        self.assertIn("--native", (SCRIPTS / "install/osint-pi").read_text())
+        self.assertIn("--wsl", (SCRIPTS / "install/osint-pi-wsl").read_text())
+
+
+class GitStatusTests(SandboxFixture):
+    def setUp(self):
+        super().setUp()
+        if not shutil.which("git"):
+            self.skipTest("git is not installed")
+        # Replace the fixture's placeholder .git with a real repository.
+        shutil.rmtree(self.project / ".git")
+
+    def git(self, *args):
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(self.project),
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    def snapshot(self):
+        destination = self.state / "git-status"
+        sandbox.git_status_snapshot(self.project, destination)
+        return destination.read_text()
+
+    def test_clean_and_dirty_states_are_described(self):
+        self.git("init", "-q", "-b", "main")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "initial")
+        clean = self.snapshot()
+        self.assertIn("## main", clean)
+        self.assertNotIn(" M ", clean)
+        (self.workspace / "AGENTS.md").write_text("changed rule")
+        (self.workspace / "new-skill.txt").write_text("new")
+        dirty = self.snapshot()
+        self.assertIn("workspace/AGENTS.md", dirty)
+        self.assertIn("?? workspace/new-skill.txt", dirty)
+        self.assertIn("reminding", dirty)
+
+    def test_failure_is_reported_not_raised(self):
+        destination = self.state / "git-status"  # setUp removed the repository
+        self.assertIn("No Git repository", self.snapshot())
+        self.assertTrue(destination.is_file())
+
+
+class SandboxBoundaryTests(SandboxFixture):
     def require_bwrap(self):
         if not Path("/usr/bin/bwrap").exists():
             self.skipTest("system bubblewrap is not installed")
-        probe = subprocess.run(
-            self.argv(["/bin/true"]), capture_output=True, text=True, check=False
-        )
+        probe = subprocess.run(self.argv(["/bin/true"]), capture_output=True, text=True, check=False)
         if probe.returncode:
             self.skipTest("unprivileged bubblewrap unavailable: " + probe.stderr.strip())
 
     def test_real_filesystem_boundary(self):
         self.require_bwrap()
+        status = self.state / "git-status"
+        status.write_text("## main\n")
         code = textwrap.dedent("""
             import os
             from pathlib import Path
             import sys
             assert not Path(sys.argv[1]).exists(), 'host secret exposed'
             assert not Path('/mnt/c').exists()
+            assert not Path('/mnt/osint-ai').exists()
             assert not Path('/init').exists()
             assert not Path('/dev/dxg').exists()
-            assert list(Path('/run').iterdir()) == []
-            assert not Path('/workspace/.git/config').exists()
+            assert [p.name for p in Path('/run').iterdir()] == ['git-status']
+            assert Path('/run/git-status').read_text() == '## main\\n'
+            assert not Path('/opt/osint-ai/project/.git/config').exists()
+            assert Path('/opt/osint-ai/project/pixi.toml').read_text() == 'project manifest'
             assert not os.environ.get('AWS_SECRET_ACCESS_KEY')
-            for p in ['/workspace/.git/config', '/workspace/scripts/protected', '/etc/hosts']:
+            for p in ['/opt/osint-ai/project/.git/config',
+                      '/opt/osint-ai/project/pixi.toml',
+                      '/opt/osint-ai/project/wsl/scripts/protected',
+                      '/run/git-status',
+                      '/etc/hosts']:
                 try:
                     Path(p).write_text('should fail')
                 except OSError:
@@ -270,28 +534,37 @@ class SandboxFixture(unittest.TestCase):
                 else:
                     raise AssertionError('unexpected write: ' + p)
             Path('/workspace/AGENTS.md').write_text('updated instructions')
-            Path('/workspace/pixi.toml').write_text('updated dependencies')
-            Path('/workspace/.pixi/test').write_text('linux storage')
-            Path('/workspace/agents/new-skill').mkdir()
-            Path('/workspace/agents/new-skill/SKILL.md').write_text('new skill')
-            link = Path('/workspace/agents/escape')
+            Path('/workspace/.agents/skills/new-skill').mkdir()
+            Path('/workspace/.agents/skills/new-skill/SKILL.md').write_text('new skill')
+            link = Path('/workspace/escape')
             link.symlink_to(sys.argv[1])
-            assert not link.exists(), 'symlink escaped sandbox'
+            assert not link.exists(), 'symlink escaped the sandbox'
             Path.home().joinpath('state').write_text('persistent')
         """)
         with patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "must-not-leak"}):
             result = subprocess.run(
-                self.argv(["/usr/bin/python3", "-c", code, str(self.secret)]),
+                self.argv(["/usr/bin/python3", "-c", code, str(self.secret)], git_status=status),
                 capture_output=True,
                 text=True,
                 check=False,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.secret.read_text(), "not accessible")
-        self.assertEqual((self.state / "pixi/test").read_text(), "linux storage")
-        self.assertFalse((self.project / ".pixi/test").exists())
-        self.assertEqual((self.project / "agents/new-skill/SKILL.md").read_text(), "new skill")
+        self.assertEqual(
+            (self.workspace / ".agents/skills/new-skill/SKILL.md").read_text(), "new skill"
+        )
         self.assertEqual((self.state / "agent-home/state").read_text(), "persistent")
+        self.assertEqual((self.project / "pixi.toml").read_text(), "project manifest")
+
+    def test_cwd_is_the_workspace(self):
+        self.require_bwrap()
+        result = subprocess.run(
+            self.argv(["/usr/bin/python3", "-c", "import os; print(os.getcwd())"]),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(result.stdout.strip(), "/workspace")
 
     def test_shared_network_reaches_local_server(self):
         self.require_bwrap()
@@ -306,38 +579,43 @@ class SandboxFixture(unittest.TestCase):
 
 
 class ServerTests(unittest.TestCase):
+    FAKE = """#!/usr/bin/python3
+import http.server
+import json
+import sys
+from pathlib import Path
+Path({argv_log!r}).write_text(json.dumps(sys.argv[1:]))
+if '--list-devices' in sys.argv:
+    if {has_gpu}:
+        print('Available devices:\\n  CUDA0: fake test GPU')
+        sys.exit(0)
+    print('failed to initialize CUDA', file=sys.stderr)
+    sys.exit(1)
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'{{"status":"ok"}}')
+    def log_message(self, *args):
+        pass
+port = int(sys.argv[sys.argv.index('--port') + 1])
+http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
+"""
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
         self.state = root / "state"
         self.state.mkdir()
+        self.argv_log = root / "argv.json"
         runtime = root / "runtime"
         (runtime / "bin").mkdir(parents=True)
         self.binary = runtime / "bin/llama-server"
-        self.binary.write_text(
-            textwrap.dedent("""\
-            #!/usr/bin/python3
-            import http.server
-            import sys
-            if '--list-devices' in sys.argv:
-                print('Available devices:\\n  CUDA0: fake test GPU')
-                sys.exit(0)
-            assert '--no-models-autoload' in sys.argv
-            class Handler(http.server.BaseHTTPRequestHandler):
-                def do_GET(self):
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b'{"status":"ok"}')
-                def log_message(self, *args):
-                    pass
-            port = int(sys.argv[sys.argv.index('--port') + 1])
-            http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
-        """)
-        )
-        self.binary.chmod(0o755)
-        gpu = root / "dxg"
-        gpu.touch()
+        self.has_gpu = True
+        self.write_fake()
+        self.gpu = root / "dxg"
+        self.gpu.touch()
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
@@ -346,7 +624,7 @@ class ServerTests(unittest.TestCase):
             ("STATE", self.state),
             ("MODELS", root / "models"),
             ("PRESETS", root / "models.ini"),
-            ("GPU_DEVICE", gpu),
+            ("GPU_DEVICE", self.gpu),
             ("PORT", port),
             ("STARTUP_TIMEOUT", 3),
         ]:
@@ -361,6 +639,18 @@ class ServerTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.addCleanup(self.stop)
 
+    def write_fake(self, *, has_gpu=None):
+        if has_gpu is not None:
+            self.has_gpu = has_gpu
+        self.binary.write_text(self.FAKE.format(argv_log=str(self.argv_log), has_gpu=self.has_gpu))
+        self.binary.chmod(0o755)
+
+    def recorded_argv(self):
+        return json.loads(self.argv_log.read_text())
+
+    def record(self):
+        return json.loads((self.state / "server.json").read_text())
+
     def stop(self):
         pidfile = self.state / "server.json"
         if pidfile.exists():
@@ -373,16 +663,44 @@ class ServerTests(unittest.TestCase):
 
     def test_start_idempotence_and_stop(self):
         server.main("start")
-        record = json.loads((self.state / "server.json").read_text())
+        record = self.record()
+        self.assertEqual(record["backend"], "cuda")
         self.assertTrue(server.healthy())
         server.main("start")
-        self.assertEqual(json.loads((self.state / "server.json").read_text()), record)
+        self.assertEqual(self.record(), record)
         server.main("stop")
         self.assertFalse((self.state / "server.json").exists())
         self.assertFalse(server.owned_process(record))
         os.waitpid(record["pid"], 0)
         # No TIME_WAIT-induced false "port occupied" after stopping.
         server.main("start")
+        self.assertTrue(server.healthy())
+
+    def test_gpu_layers_are_left_alone_on_a_gpu(self):
+        server.main("start")
+        self.assertNotIn("--n-gpu-layers", self.recorded_argv())
+
+    def test_restart_replaces_the_running_server(self):
+        server.main("start")
+        first = self.record()["pid"]
+        server.main("restart")
+        second = self.record()["pid"]
+        self.assertNotEqual(first, second)
+        self.assertTrue(server.healthy())
+        os.waitpid(first, 0)
+
+    def test_no_gpu_device_falls_back_to_cpu(self):
+        self.gpu.unlink()
+        server.main("start")
+        self.assertEqual(self.record()["backend"], "cpu")
+        argv = self.recorded_argv()
+        self.assertEqual(argv[argv.index("--n-gpu-layers") + 1], "0")
+        self.assertTrue(server.healthy())
+
+    def test_cuda_build_without_a_device_falls_back_to_cpu(self):
+        self.write_fake(has_gpu=False)
+        server.main("start")
+        self.assertEqual(self.record()["backend"], "cpu")
         self.assertTrue(server.healthy())
 
     def test_stale_pid_is_not_owned(self):
@@ -395,11 +713,6 @@ class ServerTests(unittest.TestCase):
             listener.listen()
             with self.assertRaisesRegex(RuntimeError, "another process"):
                 server.main("start")
-
-    def test_failed_cuda_detection(self):
-        self.binary.write_text('#!/bin/sh\necho "failed to initialize CUDA" >&2\n')
-        with self.assertRaisesRegex(RuntimeError, "No usable CUDA"):
-            server.main("start")
 
     def test_startup_timeout_cleans_up(self):
         self.binary.write_text(

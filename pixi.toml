@@ -6,17 +6,37 @@ platforms = [{ name = "linux-64-glibc234", platform = "linux-64", glibc = "2.34"
 preview = ["pixi-build"]
 version = "0.1.0"
 
+# The functional assistant works in `workspace/`; these tasks start it and
+# maintain the code deployment. `osint-pi` uses the `workspace/` of this
+# checkout; `osint-pi-wsl` uses the `workspace/` of the Windows checkout that
+# the WSL boot helper mounts at /mnt/osint-ai. Both enter bubblewrap first.
 [tasks]
-install = "bash scripts/install.sh"
+install = "bash wsl/scripts/install.sh"
+osint-pi = "bash wsl/scripts/launch-pi.sh native"
+osint-pi-wsl = "bash wsl/scripts/launch-pi.sh wsl"
+start-server = "bash wsl/scripts/launch-server.sh start"
+stop-server = "bash wsl/scripts/launch-server.sh stop"
+restart-server = "bash wsl/scripts/launch-server.sh restart"
+update-project = "bash wsl/scripts/update-project.sh"
 test = "python -m unittest discover -s tests -v"
 
-# New tools belong here. `pixi add <package>` and `pixi run <command>`
-# work inside the agent sandbox; .pixi is writable Linux storage.
+# Tools live here and are installed by a maintainer in the project root. The
+# sandbox mounts this environment read-only, so the assistant asks for a tool
+# instead of installing it silently.
 [dependencies]
 python = "=3.14"
 pip = "*"
 uv = "*"
 git = "*"
+# Spreadsheets: Excel 97-2003 (.xls), Excel 2007+ (.xlsx) and binary sheets.
+pandas = "*"
+openpyxl = "*"
+xlrd = "*"
+pyxlsb = "*"
+# Reports: Markdown to PDF, plus PDF text extraction for Markdown conversion.
+pandoc = "*"
+weasyprint = "*"
+poppler = "*"
 
 [feature.pi.dependencies]
 pi-coding-agent = "=0.85.1"
