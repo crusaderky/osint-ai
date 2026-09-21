@@ -78,6 +78,14 @@ The installer:
 - Preserves user state on a completed-install rerun; it does not update the
   trusted runtime. There is no automatic updater in this skeleton.
 
+Uninstalling is manual and documented for users in the README. What it removes:
+`wsl --unregister osint-ai` deletes the private distribution and its disk — Pi
+credentials, sessions and settings, cached model weights, the Linux checkout and
+the root-owned launchers under `/usr/local`. Deleting `%LOCALAPPDATA\osint-ai`
+removes the download cache and the portable MobaXterm copy. The Windows checkout,
+including `workspace/`, and everything pushed to GitHub survive both steps, and
+`wsl.exe` plus the Windows feature stay installed for other software.
+
 `pixi r install` is an installation check **after** Windows provisioning. It
 does not elevate or execute root commands from the checkout.
 

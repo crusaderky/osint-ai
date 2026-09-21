@@ -87,6 +87,10 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       executable, libraries or presets.
 - [ ] `pixi r update-project` updates a WSL installation and the next chatbot
       start uses the new tools; a diverged Linux checkout is refused.
+- [ ] README uninstall steps work in order on a used installation: unregistered
+      distro, `%LOCALAPPDATA\osint-ai` gone, icons gone, no other distro touched,
+      `wsl --uninstall` not required. Reinstall + **Pull** restores skills and
+      `workspace/AGENTS.md`, and a deleted OpenRouter key stops working.
 
 ## Release gates still outside skeleton
 

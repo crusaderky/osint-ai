@@ -23,6 +23,7 @@ text files that you can read, change and share. Those files are called
 7. [After any change: commit and push](#after-any-change-commit-and-push)
 8. [Spreadsheets and PDF reports](#spreadsheets-and-pdf-reports)
 9. [If something goes wrong](#if-something-goes-wrong)
+10. [Uninstall everything](#uninstall-everything)
 
 ---
 
@@ -230,6 +231,97 @@ on that PC: someone else may redo work you already finished.
 Review what the assistant produces before you rely on it. It can be wrong, it
 repeats the mistakes of the pages it reads, and an online AI service receives
 what you send it. Keep confidential files outside the project folder.
+
+If you only want to sign out of the AI service but keep the program, type
+**`/logout`** in the assistant instead of uninstalling.
+
+## Uninstall everything
+
+Uninstalling removes the program and its private Linux part. It **never deletes
+anything on GitHub**, and it does not delete your research folder unless you
+delete it yourself in step 6.
+
+You do not need administrator rights.
+
+### 1. Save your work first
+
+Open GitHub Desktop, tick the files, press **Commit**, then **Push**. If GitHub
+Desktop is not available, copy `C:\Users\<your name>\osint-ai` somewhere else.
+
+### 2. Close it
+
+In the assistant type `/quit`, then close the terminal window.
+
+### 3. Delete the desktop icons
+
+Right-click **OSINT AI Terminal**, **OSINT AI Terminal (basic)** and **OSINT AI
+Files** → **Delete**.
+
+### 4. Remove the private Linux part (the big one)
+
+This is where the AI sign-in, your chat history, downloaded models and the
+program's Linux tools live. It cannot be undone from Windows.
+
+Press the Windows key, type `PowerShell`, press Enter, then type these two lines,
+one after the other, pressing Enter after each:
+
+```text
+wsl --list
+wsl --unregister osint-ai
+```
+
+The first line lists the Linux systems on your PC; the second deletes only the
+one called **osint-ai**.
+
+> **Do not** run `wsl --uninstall`. That removes Linux from the whole computer
+> and can delete other Linux systems you or your company use.
+
+### 5. Delete the program's app folder
+
+Press **Windows key + R**, type `%LOCALAPPDATA%`, press Enter, right-click the
+**osint-ai** folder → **Delete**. This removes the downloaded installer, the copy
+of MobaXterm that setup created, and the Linux disk file if step 4 was skipped.
+Same thing in PowerShell:
+
+```text
+Remove-Item -LiteralPath "$env:LOCALAPPDATA\osint-ai" -Recurse -Force
+```
+
+If Windows says a file is in use, close the terminal window and try again.
+
+If MobaXterm was already on this PC before OSINT AI, setup only pointed at it, so
+it stays. Remove it through **Settings → Apps** if you want it gone.
+
+### 6. Delete the research folder (optional)
+
+`C:\Users\<your name>\osint-ai` holds your skills, `AGENTS.md` and reports. Delete
+it only after step 1. In GitHub Desktop, choose **Repository → Remove** so it
+stops appearing in the list; that only takes it off the list and deletes no
+files.
+
+### 7. Clean up your accounts
+
+* Delete the key you made for this PC: open <https://openrouter.ai> → your name →
+  **Keys** → **Delete** next to that key. Worth doing if anyone else uses this
+  computer, and it stops the key working anywhere, even if a copy survived.
+* GitHub Desktop: **File → Options → Accounts → Sign out** if you use a shared PC.
+
+### 8. Leave Windows Subsystem for Linux alone
+
+Windows' Linux feature is shared with other programs and with your company's
+tools. Keep it installed unless you are certain nothing else uses it; removing it
+needs an administrator and a restart
+(**Windows key**, type `Turn Windows features on or off`, untick **Windows
+Subsystem for Linux**, restart).
+
+### 9. Check it is really gone
+
+* PowerShell → `wsl --list` shows no `osint-ai`.
+* **Windows key + R** → `%LOCALAPPDATA%` has no **osint-ai** folder.
+* The three desktop icons are gone.
+
+To start again later: run `wsl\Install.cmd`, then in GitHub Desktop use **Pull**
+to bring your skills and rules back.
 
 ---
 
