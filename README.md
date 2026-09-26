@@ -141,6 +141,21 @@ Good habits:
 * The assistant writes files for you. It never commits them; that is your
   Commit and Push.
 
+### When the assistant calls in help
+
+For a long, wide job — a company with twenty sources to sweep, a report with
+many sections — the assistant can start **sub-agents**: small copies of itself
+that each do one narrow job and hand the result back. They are the same model,
+in the same sandbox, with the same rules and the same sources; the assistant
+still writes the answer, and it still needs every fact to carry a link and a
+date.
+
+Two things to expect: it takes longer and it uses more of the model at once, so
+on a local model a sub-agent job can be slow. Say plainly what you want, for
+example *"Check the four registries in parallel and tell me what you could not
+verify"*, and keep one subject per request. If you would rather it answer
+directly, say so — that is a normal request.
+
 ## AGENTS.md: the rulebook
 
 **`AGENTS.md`** is a plain text file the assistant reads every time it starts. It

@@ -35,9 +35,26 @@ class ConfigurationTests(unittest.TestCase):
     def test_manifest(self):
         data = tomllib.loads((ROOT / "pixi.toml").read_text())
         self.assertEqual(data["workspace"]["platforms"][0]["platform"], "linux-64")
-        self.assertEqual(data["feature"]["pi"]["dependencies"]["pi-coding-agent"], "=0.85.1")
+        self.assertEqual(data["feature"]["pi"]["dependencies"]["pi-coding-agent"], "=0.86.1")
         self.assertEqual(data["environments"]["agents"], ["pi"])
         self.assertTrue(data["environments"]["llamacpp-binary-cuda"]["no-default-feature"])
+
+    def test_extensions_are_pinned_and_match_the_manifest(self):
+        """Every extension is pinned, and the recipe builds against the same Pi."""
+        data = tomllib.loads((ROOT / "pixi.toml").read_text())
+        version = data["feature"]["pi"]["dependencies"]["pi-coding-agent"].lstrip("=")
+        recipe = (ROOT / "pixi-recipes/pi-extensions/recipe.yaml").read_text()
+        build = re.search(r"PLUGINS: >-\n(?P<plugins>(?: {8}\S+\n)+)", recipe)
+        self.assertIsNotNone(build, "PLUGINS must be a space-separated pin list")
+        plugins = build.group("plugins").split()
+        self.assertIn("pi-subagents@0.71.0", plugins)
+        for plugin in plugins:
+            self.assertRegex(plugin, r"^(@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+$", plugin)
+        # The recipe installs the extensions with the Pi the environment pins,
+        # so a bump of one cannot silently build the plugins against the other.
+        requirements = re.search(r"requirements:\n(?P<body>(?: {2,4}\S.*\n)+)", recipe).group("body")
+        pinned = set(re.findall(r"pi-coding-agent =(\S+)", requirements))
+        self.assertEqual(pinned, {version})
 
     def test_manifest_tools_and_tasks(self):
         data = tomllib.loads((ROOT / "pixi.toml").read_text())
@@ -65,6 +82,45 @@ class ConfigurationTests(unittest.TestCase):
             match = re.search(r"(wsl/scripts/[\w.-]+)", command)
             if match:
                 self.assertTrue((ROOT / match.group(1)).is_file(), task)
+
+    def test_subagent_discovery_never_reads_skill_files(self):
+        """Delegation scans the legacy ``.agents`` tree; skills must stay skills.
+
+        pi-subagents reads sub-agent definitions from ``<project>/.agents/**``,
+        which is where this project keeps its skills. It must skip
+        ``.agents/skills/**`` itself; if a future version stops doing that, a
+        SKILL.md is offered to the model as a sub-agent with the skill body as
+        its system prompt. The check uses the extension's own discovery, so it
+        tracks the installed version instead of re-implementing its rules.
+        """
+        environment = ROOT / ".pixi/envs/agents"
+        node = environment / "bin/node"
+        package = environment / "home/.pi/agent/npm/node_modules/pi-subagents/src/agents/agents.js"
+        if not node.is_file() or not package.is_file():
+            self.skipTest("the agents environment with pi-subagents is not installed")
+        with tempfile.TemporaryDirectory() as temporary:
+            probe = Path(temporary) / "discovery.mjs"
+            probe.write_text(
+                f'import {{ discoverAgentsAll }} from "{package}";\n'
+                f'const all = discoverAgentsAll({str(ROOT / "workspace")!r}, "openrouter");\n'
+                "const list = Array.isArray(all) ? all : Object.values(all).flat();\n"
+                'console.log(JSON.stringify(list.filter((a) => a && a.name).map((a) => a.name)));\n'
+            )
+            result = subprocess.run(
+                [str(node), str(probe)],
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+                env=dict(os.environ, HOME=temporary, PI_OFFLINE="1"),
+            )
+        self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+        names = set(json.loads(result.stdout.strip().splitlines()[-1]))
+        skills = {path.parent.name for path in (ROOT / "workspace/.agents/skills").glob("*/SKILL.md")}
+        self.assertTrue(skills, "the workspace must still contain skills")
+        self.assertEqual(names & skills, set(), "a skill file was loaded as a sub-agent")
+        # The extension's own agents are still discovered, so the probe is real.
+        self.assertIn("researcher", names)
 
     def test_skill_discovery_and_guidance(self):
         settings = json.loads((ROOT / "pixi-recipes/pi-home/settings.json").read_text())

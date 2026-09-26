@@ -42,7 +42,7 @@ weasyprint = "*"
 poppler = "*"
 
 [feature.pi.dependencies]
-pi-coding-agent = "=0.85.1"
+pi-coding-agent = "*"
 pi-extensions = { path = "pixi-recipes/pi-extensions" }
 pi-home = { path = "pixi-recipes/pi-home" }
 
@@ -51,5 +51,5 @@ llama-cpp = { path = "pixi-recipes/llama-cpp-binary", flags = ["cuda"] }
 
 [environments]
 # Default environment is for skill tools, separate from Pi's running runtime.
-agents = ["pi"]
+default = ["pi"]
 llamacpp-binary-cuda = { features = ["llamacpp-binary-cuda"], no-default-feature = true }

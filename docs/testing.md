@@ -32,6 +32,10 @@ calls. Also run Bash syntax checks and ShellCheck over `wsl/scripts`, and instal
 both Pixi environments to validate the local build recipes. Never claim Windows
 support based on the Python tests alone.
 
+The Linux suite checks that the extension pins and the Pi version are what the
+repository claims. It cannot show that delegation works: no test starts a child
+session, and none of them calls a model. See the checklist items on delegation.
+
 ## Required Windows 11 x64 acceptance matrix
 
 Test on clean Home and Pro machines/VMs with virtualization enabled:
@@ -82,6 +86,11 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       directory boundary are tested. These require Windows tests, not Linux mocks.
 - [ ] OpenRouter OAuth URL/callback paste and API-key login work. Login,
       sessions, settings and extension state persist after a restart.
+- [ ] Delegation: the assistant hands a wide research job to a sub-agent, the
+      child finishes, and the answer arrives with links and dates. The child
+      creates no file outside `workspace\`; it cannot read the Linux checkout,
+      `C:\`, or a `.git`; a child that asks for a Git worktree fails cleanly
+      instead of hanging. Note the extra time on a local model.
 - [ ] No NVIDIA GPU: `restart-server` reports the CPU fallback, exits 0, the
       desktop chain continues, and a small model answers (slowly). Accept only a
       real answer, not `nvidia-smi` output.

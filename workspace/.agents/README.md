@@ -1,36 +1,32 @@
-# Your skills
+# Runtime workspace
 
-Ask the chatbot to create skills here. Each skill gets its own folder:
+This folder is what the agent has access to at runtime (in addition to the internet)/
 
-```text
-workspace/
-  AGENTS.md                 rules the chatbot always follows
-  .agents/
-    skills/
-      compliance-report/   how the final report is put together
-      markdown-pdf/         PDF <-> Markdown conversion kit
-      spreadsheet-reader/
-      your-new-skill/
-        SKILL.md
-        scripts/
-        references/
-```
+- `AGENTS.md`: this teaches the agent its overall behaviour. It is visible to it at all
+  times. This files is for the agent to read; not for humans.
+- `.agents/skills/*/SKILL.md`: each of these files is a script that teaches a specific
+  action to the agent. The agent only reads it when it needs to.
+- Any files that you want your agent to see (copy-pasted from elsewhere on your disk)
+- Any files that your agent creates
 
-Open this folder with the **OSINT AI Files** desktop icon, then
-`workspace` \ `.agents` \ `skills`. (Turn on "show hidden files" in File Explorer
-if `.agents` is invisible: View tab → tick "Hidden items".)
+## What you can ask the agent
 
-* Review any `SKILL.md` with Notepad.
-* After editing or adding a skill, type `/reload` in the chatbot.
-* A skill is an instruction the chatbot trusts, so read what it wrote before you
-  rely on it.
-* Finished work stays useful: open your Windows Git app (GitHub Desktop),
-  **Commit** the changes, then **Push** so your team and your other PCs get them.
+### Run research on organizations and individuals
 
-The three skills that come with the project:
+- _"Find out everything about Nigel Farage and generate a PDF report."_
+- _"Take a look at @suspicious_claim.pdf that some guy just emailed me and
+  prove or disprove their claims."_
 
-| Skill | What it does |
-| --- | --- |
-| `spreadsheet-reader` | Reads `.xls`, `.xlsx`, `.xlsb` and CSV files |
-| `compliance-report` | Structures the report you hand over: sections, confidence labels, sources |
-| `markdown-pdf` | Turns a Markdown file into a PDF, and a PDF back into Markdown |
+### Add/update skills
+
+- _"Open website dirtysecrets.com and search for Nigel Farage on its search bar. In the
+  returned HTML page, the important bits are X and Y. Disregard the rest. Note down how
+  to correctly query this source in a new skill, which you must call
+  'source-dirtysecrets'"_.
+- _"While analysing the data from dirtysecrets.com, you returned data from 2013, which
+  is outdated. On this website specifically, you must always ignore data earlier than
+  2024. Update the relevant skill to avoid the same mistake in the future."_
+- _"Do not, EVER, say the word 'load-bearing' again. Note it down in @AGENTS.md."_
+
+You shouldn't typically need to write these files by hand. Asking the agent to modify
+them itself is easier.

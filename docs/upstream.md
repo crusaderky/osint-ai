@@ -9,10 +9,18 @@ Adapted from the adjacent `pixi-llm-recipes` checkout supplied for this task:
   checksum-verified rattler-build source. No CPU/Vulkan/ROCm or Windows-native
   binary paths. The server starts this build on the CPU when no CUDA device is
   present.
-- `pi`: conda-forge pi-coding-agent 0.85.1; Linux only.
+- `pi`: conda-forge pi-coding-agent 0.86.1; Linux only. Bumped from 0.85.1 for
+  `pi-subagents`, whose peer requirement is `@earendil-works/pi-ai >=0.86.1`;
+  0.86.1 is also the host baseline for its dynamic tool activation.
 - `pi-extensions`: retained pinned pi-llama-cpp, pi-web-access, pi-token-speed,
-  and ask-user-question. Dropped developer-only btw/caveman/usage extensions and
-  rtk command rewriting. Removed shell and Windows-specific build variants.
+  and ask-user-question, and added pinned pi-subagents 0.71.0 for delegation.
+  Dropped developer-only btw/caveman/usage extensions, intercom and rtk command
+  rewriting. Removed shell and Windows-specific build variants. pi-subagents
+  costs about 3.5k of system prompt. It reads sub-agent definitions from the
+  project's legacy `.agents/**/*.md` tree, where this project's skills live, but
+  0.71.0 skips `.agents/skills/**` itself, so no exclusion setting is needed;
+  verified with the extension's own discovery, which reported only its 14
+  bundled agents.
 - `pi-home`: retained the package structure, keybindings and web-search config;
   replaced global guidance with the functional workspace's instructions and added
   local llama server defaults. Skills are discovered at

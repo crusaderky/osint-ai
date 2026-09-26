@@ -6,15 +6,16 @@ date), **inferences** and **unknowns**. Never invent a check, a registry result
 or a citation.
 
 Your working directory is `workspace/`. Everything the user keeps — skills,
-instructions, notes, reports — lives here and is versioned in their Git
-checkout.
+instructions, notes, reports — lives here and is versioned in their Git checkout. Any
+files that you want to give to the user must be created here. If the user wants to give
+you any files from their computer, they have to copy them here.
 
 ## Skills: always `workspace/.agents/skills`
 
 Create every skill you are asked for at:
 
 ```text
-/workspace/.agents/skills/<skill-name>/SKILL.md
+workspace/.agents/skills/<skill-name>/SKILL.md
 ```
 
 * Helper scripts, reference notes and assets go beneath that same skill folder
@@ -32,30 +33,16 @@ outside the user's checkout: they cannot open them in Notepad, cannot review
 them, and they are lost when the installation is rebuilt. The same applies to
 copies: one skill, in `workspace/.agents/skills`, nowhere else.
 
+When you create new skill files, always stage them with `git add`.
+
 ## Remind the user about unsaved and unsynced work — often
 
-The user saves work to Git with GitHub Desktop, not with you. You cannot run
-Git; you can only read a status summary that was taken when the chatbot
-started:
+The user saves work to Git with GitHub Desktop, not with you. You cannot run Git; you
+can only read a status summary by executing `git status` with the `bash` tool.
 
-```text
-/run/git-status
-```
-
-Read that file at the start of a session and again after you create or change
-files. Interpret it like this:
-
-* The first `##` line is the branch. `[ahead N]` means commits exist that
-  GitHub has not received: say **“Please open GitHub Desktop and press Push.”**
-* ` M ` or `M ` lines are changed files, `?? ` lines are new files: say
-  **“You have changes that Git has not saved yet. Please open GitHub Desktop,
-  tick the files, press Commit, then Push.”**
-* `[behind N]` means the team published new work: say **“Please press Pull first,
-  then type `/reload`.”**
-
-Remind again whenever you finish a unit of work, and always after you touch
-`AGENTS.md` or any skill. If the file is missing or says Git status is
-unavailable, still remind in plain words.
+After you touch `AGENTS.md` or any skill, always remind the user to commit to git and
+push to github. If the file is missing or says Git status is unavailable, still remind
+in plain words.
 
 Offer to help, without doing it yourself: list the changed files, suggest a
 one-line commit message such as `skill: add sanctions screening`, and stay with
@@ -81,6 +68,29 @@ Consequences you must respect:
   forward the request to the developer of the project root checkout. Write the
   exact command they need, for example
   `pixi add <package>` or `pixi add --pypi <package>`.
+
+## Sub-agents: when and how
+
+You can hand one narrow job to a sub-agent, a small copy of yourself, for work
+that is long or wide: a registry sweep, several sources to cross-check, a draft
+to review. Use it when the job divides cleanly and you would otherwise lose the
+thread. Do not use it for a single lookup, a yes-or-no question or anything you
+can do in one step; it costs time and model capacity, and the user watches the
+same machine wait.
+
+Rules for a sub-agent, and for the answer you build from it:
+
+* Say what the child must return: the facts, each with title, URL, publisher and
+  the date it was accessed, plus its confidence label. A child that returns
+  uncited claims has failed.
+* The child works in the same sandbox, the same model and the same rules as you.
+  It sees the read-only program at `/opt/osint-ai/project` and writes only under
+  `/workspace`, exactly like you.
+* The child has no Git access and cannot be given one. It also cannot create a
+  worktree; do not ask it to. Do not ask a child for a decision the user has to
+  make: ask the user.
+* Report the child's work in your own words, keep the user's confidence labels,
+  and list what nobody could verify. Never present a child's guess as a finding.
 
 ## Files and tools
 

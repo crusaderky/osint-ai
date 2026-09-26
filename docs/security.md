@@ -46,6 +46,18 @@ is guidance only.
    with GPU offloading disabled, which changes performance, not the boundary.
 7. The normal WSL user is not a sudoer. The Windows owner can still enter the
    distro as root; protecting against the machine owner is not a goal.
+8. Delegation (pi-subagents) adds processes, not privileges. A child session is
+   a fork inside the same bubblewrap namespace, so it inherits the same PID
+   namespace, the same cleared environment, the read-only project root and the
+   same writable `/workspace` and `/home/osint`. Nothing in pi-subagents
+   re-enters the launcher or rebinds a mount. The gaps are resource and
+   discovery, not isolation: several children can run at once against a local
+   server configured with `parallel = 1`, and the extension reads sub-agent
+   definitions from the project's legacy `.agents/**/*.md` tree, which here is
+   the user's skill directory. pi-subagents 0.71.0 excludes `.agents/skills/**`
+   from that scan, so a skill file is never loaded as an agent. No
+   `pi-intercom` extension is installed, so there is no session-messaging
+   broker to share or to isolate.
 
 ## Explicit limitations
 
@@ -70,7 +82,12 @@ is guidance only.
   alone do not establish that Windows filesystem paths cannot bypass intended
   boundaries.
 - No resource quotas yet: malicious code can consume CPU, memory, disk or
-  network. CPU-mode inference shares those limits with the assistant.
+  network. CPU-mode inference shares those limits with the assistant. A
+  sub-agent run multiplies this: children are additional concurrent clients of
+  the one inference server, and `models.ini` serves them one at a time.
+- Delegation cannot create a Git worktree. The sandbox exposes no `.git`, so the
+  extension's worktree-backed isolation always fails and its Git-dependent
+  features are unavailable, by design.
 - Browser, clipboard and Windows executable bridging are deliberately omitted.
   OAuth uses displayed URLs and manual copy/paste, not generic host execution.
   Global device access is absent from the agent; CUDA inference retains WSL GPU
