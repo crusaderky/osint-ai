@@ -7,7 +7,8 @@ workspace/
   AGENTS.md                 rules the chatbot always follows
   .agents/
     skills/
-      markdown-pdf/         SKILL.md plus its own scripts and notes
+      compliance-report/   how the final report is put together
+      markdown-pdf/         PDF <-> Markdown conversion kit
       spreadsheet-reader/
       your-new-skill/
         SKILL.md
@@ -26,9 +27,10 @@ if `.agents` is invisible: View tab → tick "Hidden items".)
 * Finished work stays useful: open your Windows Git app (GitHub Desktop),
   **Commit** the changes, then **Push** so your team and your other PCs get them.
 
-The two skills that come with the project:
+The three skills that come with the project:
 
 | Skill | What it does |
 | --- | --- |
 | `spreadsheet-reader` | Reads `.xls`, `.xlsx`, `.xlsb` and CSV files |
-| `markdown-pdf` | Turns a Markdown report into a PDF, and a PDF back into Markdown |
+| `compliance-report` | Structures the report you hand over: sections, confidence labels, sources |
+| `markdown-pdf` | Turns a Markdown file into a PDF, and a PDF back into Markdown |

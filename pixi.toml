@@ -33,7 +33,10 @@ pandas = "*"
 openpyxl = "*"
 xlrd = "*"
 pyxlsb = "*"
-# Reports: Markdown to PDF, plus PDF text extraction for Markdown conversion.
+# Reports: Markdown to PDF, plus PDF reading. `poppler` provides pdfinfo,
+# pdftotext and pdftoppm; `pandoc` and `weasyprint` are the PDF engine. A skill
+# script may only use these, coreutils, or a base Linux program - a test in
+# tests/test_skeleton.py enforces it, so add the package here first.
 pandoc = "*"
 weasyprint = "*"
 poppler = "*"

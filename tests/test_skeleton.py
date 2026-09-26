@@ -92,6 +92,7 @@ class ConfigurationTests(unittest.TestCase):
         names = sorted(path.parent.name for path in skills.glob("*/SKILL.md"))
         self.assertIn("spreadsheet-reader", names)
         self.assertIn("markdown-pdf", names)
+        self.assertIn("compliance-report", names)
         for name in names:
             text = (skills / name / "SKILL.md").read_text()
             frontmatter = re.match(r"---\n(.*?)\n---\n", text, re.S)
@@ -101,15 +102,102 @@ class ConfigurationTests(unittest.TestCase):
             )
             self.assertEqual(fields.get("name", "").strip(), name)
             self.assertGreater(len(fields.get("description", "").strip()), 40, name)
-        # Both documented workflows point at helpers that exist.
+        # Every documented workflow points at helpers that exist.
         reader = (skills / "spreadsheet-reader/SKILL.md").read_text()
         self.assertIn("scripts/sheet.py", reader)
         self.assertTrue((skills / "spreadsheet-reader/scripts/sheet.py").is_file())
-        report = (skills / "markdown-pdf/SKILL.md").read_text()
-        self.assertIn("scripts/build-pdf.sh", report)
-        self.assertIn("pdftotext", report)
+        converter = (skills / "markdown-pdf/SKILL.md").read_text()
+        self.assertIn("scripts/build-pdf.sh", converter)
+        self.assertIn("pdftotext", converter)
         self.assertTrue((skills / "markdown-pdf/scripts/build-pdf.sh").is_file())
         self.assertTrue((skills / "markdown-pdf/assets/report.css").is_file())
+        self.assertTrue((skills / "markdown-pdf/assets/template.html").is_file())
+
+    def test_report_and_conversion_skills_are_separate(self):
+        """Report authorship and PDF conversion must not drift back together."""
+        skills = ROOT / "workspace/.agents/skills"
+        report = (skills / "compliance-report/SKILL.md").read_text()
+        converter = (skills / "markdown-pdf/SKILL.md").read_text()
+        # The report skill owns the content and hands the file over.
+        for section in ("Executive summary", "Scope and method", "Sources", "confidence"):
+            self.assertIn(section, report, section)
+        self.assertIn("markdown-pdf", report)
+        self.assertIn("build-pdf.sh", report)
+        # The conversion skill owns the bytes and sends authorship elsewhere.
+        for tool in ("pandoc", "pdfinfo", "pdftotext", "pdftoppm"):
+            self.assertIn(tool, converter, tool)
+        self.assertIn("compliance-report", converter)
+        for section in ("## Executive summary", "## Scope and method", "## Sources"):
+            self.assertNotIn(section, converter, section)
+
+    def test_skill_scripts_only_use_available_programs(self):
+        """Skill scripts run on the sandbox PATH: coreutils, or a pixi dependency."""
+        # Programs that exist on any Linux, in the shell scripts' PATH.
+        always_available = {
+            "awk", "basename", "bash", "cat", "cd", "chmod", "cp", "cut", "date",
+            "dirname", "echo", "exit", "find", "grep", "head", "mkdir", "mv", "mktemp",
+            "printf", "pwd", "read", "rm", "sed", "sleep", "sort", "tail", "tee", "test",
+            "touch", "tr", "trap", "true", "uniq", "wc", "xargs",
+        }
+        # Shell keywords, builtins and trap signals are part of bash itself.
+        bash_keywords = {
+            "!", "[[", "]]", "case", "do", "done", "elif", "else", "esac", "export", "fi",
+            "for", "function", "if", "in", "local", "return", "set", "shift", "then", "unset",
+            "until", "while", "command", "source",
+            "DEBUG", "ERR", "EXIT", "INT", "PIPE", "RETURN", "TERM",
+        }
+        # Programs that are NOT part of a base Linux system: each must be
+        # delivered by pixi.toml, mapping program -> conda/pypi package.
+        pixi_provided = {
+            "pandoc": "pandoc",
+            "weasyprint": "weasyprint",
+            "pdfinfo": "poppler",
+            "pdftotext": "poppler",
+            "pdftoppm": "poppler",
+            "python3": "python",
+        }
+        dependencies = tomllib.loads((ROOT / "pixi.toml").read_text())["dependencies"]
+        skills = ROOT / "workspace/.agents/skills"
+        scripts = sorted(skills.glob("*/scripts/*.sh"))
+        self.assertTrue(scripts)
+        for script in scripts:
+            found = self.shell_commands(script.read_text())
+            unknown = found - always_available - bash_keywords - set(pixi_provided)
+            for word in sorted(unknown):
+                self.fail(
+                    f"{script.relative_to(ROOT)} runs {word!r}: not a base Linux "
+                    f"program, a bash builtin, or a pixi dependency"
+                )
+        for program, package in pixi_provided.items():
+            with self.subTest(program=program):
+                self.assertIn(package, dependencies)
+
+    @staticmethod
+    def shell_commands(text):
+        """Names run by a bash script, minus the functions it defines itself.
+
+        Not a bash parser: comments, quoted text and leading variable
+        assignments are dropped, then the text is cut at the separators that
+        start a new command. Enough to find a program that is not installed.
+        """
+        functions = set(re.findall(r"^\s*([\w.-]+)\s*\(\)\s*\{", text, re.M))
+        text = re.sub(r"\\\n", " ", text)  # a continued line is one command
+        text = re.sub(r"#.*", "", text)
+        text = re.sub(r"'[^']*'", " ", text)
+        text = re.sub(r'"[^"]*"', " ", text)
+        text = re.sub(r"`[^`]*`", " ", text)
+        text = text.replace("$(", " ( ").replace("${", " $ {")
+        commands = set()
+        for segment in re.split(r"[;|&()\n]+", text):
+            words = segment.split()
+            # A simple command may be preceded by NAME=value assignments.
+            while words and re.fullmatch(r"[A-Za-z_]\w*=\S*", words[0]):
+                words.pop(0)
+            # Anything that cannot start a program name is a flag, a
+            # redirection or an expansion, not a command.
+            if words and re.fullmatch(r"[A-Za-z_][\w.+-]*", words[0]):
+                commands.add(words[0])
+        return commands - functions
 
     def test_beginner_readme_covers_the_basics(self):
         readme = (ROOT / "README.md").read_text()

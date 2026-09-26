@@ -70,9 +70,14 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       editable. Nothing is written to `~/.pi` or `~/.agents`.
 - [ ] `spreadsheet-reader` reads `.xls`, `.xlsx`, `.xlsb`, `.csv`, warns on a
       mislabelled file, and never modifies the source.
-- [ ] `markdown-pdf` produces a titled, paginated PDF that `pdfinfo`/`pdftotext`
-      confirm; `.notdef glyph` warnings are reported to the user instead of
-      shipping empty boxes; scanned PDFs are reported as unreadable.
+- [ ] `compliance-report` produces a report with the agreed section order, a
+      confidence label on every fact, a populated `Sources` list, and nothing
+      invented; the Markdown is left in `workspace\reports\` next to the PDF.
+- [ ] `markdown-pdf` produces a PDF whose title is printed **once**, with the
+      date and the optional contents list after it, that `pdfinfo`/`pdftotext`
+      confirm and whose rendered page image is readable; `.notdef glyph`
+      warnings are reported to the user instead of shipping empty boxes;
+      scanned PDFs are reported as unreadable.
 - [ ] Windows junctions, symlinks, hardlinks and rename races across the shared
       directory boundary are tested. These require Windows tests, not Linux mocks.
 - [ ] OpenRouter OAuth URL/callback paste and API-key login work. Login,

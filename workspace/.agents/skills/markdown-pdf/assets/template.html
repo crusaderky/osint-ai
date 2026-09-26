@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!-- Pandoc template for build-pdf.sh. Deliberately minimal.
+
+     The title is printed exactly once: the script passes it in as
+     include-before, so the document's own "# " heading is removed from the
+     body. The title is also written to <title>, which is the PDF metadata
+     title. The table of contents follows the title, then the body. -->
+<html lang="$if(lang)$$lang$$else$en$endif$">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>$if(title)$$title$$else$document$endif$</title>
+  <style>
+$for(css)$
+    @import url("$css$");
+$endfor$
+  </style>
+</head>
+<body>
+$for(include-before)$
+$include-before$
+$endfor$
+$if(toc)$
+<nav id="TOC" role="doc-toc">
+$table-of-contents$
+</nav>
+$endif$
+$body$
+</body>
+</html>

@@ -169,9 +169,10 @@ A **skill** is one repeatable check, written down so the assistant performs it
 the same way every time — for you, and for everyone on your team after a
 Commit and Push.
 
-Skills live in `workspace\.agents\skills\<name>\SKILL.md`. Two come with the
-installation: `spreadsheet-reader` (reads Excel files) and `markdown-pdf`
-(writes PDF reports).
+Skills live in `workspace\.agents\skills\<name>\SKILL.md`. Three come with the
+installation: `spreadsheet-reader` (reads Excel files), `compliance-report`
+(lays out the report you hand over) and `markdown-pdf` (turns Markdown into a
+PDF, and a PDF back into Markdown).
 
 Ask the assistant to make one:
 

@@ -87,10 +87,12 @@ Consequences you must respect:
 * Save every deliverable under `/workspace` so the user can open it in Windows.
   Report paths as `workspace/...` (never Linux-only paths).
 * Available on `PATH`: `python3` with `pandas`, `openpyxl`, `xlrd`, `pyxlsb`;
-  `pandoc`; `weasyprint`; `pdftotext`, `pdfinfo`; plus standard Linux commands
-  such as `grep` and `sed`. Skills describe the
-  recommended workflow: use the spreadsheet skill for `.xls`/`.xlsx` work and
-  the Markdown/PDF skill for reports.
+  `pandoc`; `weasyprint`; `pdftotext`, `pdfinfo`, `pdftoppm`; plus standard
+  Linux commands such as `grep` and `sed`. A skill may only use these; it
+  cannot install anything. Skills describe the
+  recommended workflow: use the spreadsheet skill for `.xls`/`.xlsx` work, the
+  compliance-report skill to lay out a report, and the Markdown/PDF skill to
+  convert files.
 * Network access is available for public sources. Do not upload private client
   data to third-party services.
 

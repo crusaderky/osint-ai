@@ -144,14 +144,19 @@ Pi discovers skills from `--skill /workspace/.agents/skills` (passed by
 `wsl/scripts/pi-entry.sh`) and from `pixi-recipes/pi-home/settings.json`. Skills
 are `<skill-name>/SKILL.md` with `scripts/`, `references/` and `assets/` beneath
 the same folder. `/reload` picks up changes. Bundled skills:
-`spreadsheet-reader` (`.xls`/`.xlsx`/`.xlsb`/CSV through pandas) and
-`markdown-pdf` (Markdown to PDF with pandoc + WeasyPrint, PDF text back into
-Markdown).
+`spreadsheet-reader` (`.xls`/`.xlsx`/`.xlsb`/CSV through pandas),
+`compliance-report` (structure, confidence labels and evidence rules for the
+final deliverable) and `markdown-pdf` (Markdown to PDF with pandoc +
+WeasyPrint, PDF text back into Markdown). Report authorship and PDF conversion
+are separate skills on purpose; a test keeps them from merging back.
 
 The environment on the sandbox `PATH` is
 `/opt/osint-ai/project/.pixi/envs/agents/bin`, mounted read-only. A functional
 agent can use tools but cannot install them, which is the point: dependency
-changes are maintainer work in a project root checkout.
+changes are maintainer work in a project root checkout. A skill's shell scripts
+may only run programs that a base Linux system has, or programs that
+`pixi.toml` declares. `tests/test_skeleton.py` enforces that, so a tool that
+would be missing at runtime fails the test suite instead of the skill.
 
 ```bash
 pixi add <conda-package>          # or: pixi add --pypi <package>

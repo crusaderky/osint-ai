@@ -103,6 +103,7 @@ def main():
                 assert "models" in names, f"pi-llama-cpp did not load: {sorted(names)}"
                 assert "skill:smoke-test" in names, f"skill not discovered: {sorted(names)}"
                 assert "skill:markdown-pdf" in names and "skill:spreadsheet-reader" in names
+                assert "skill:compliance-report" in names
             finally:
                 process.terminate()
                 try:
