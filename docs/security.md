@@ -11,7 +11,10 @@ is guidance only.
    release tag when packaging; a mutable `main` default is for skeleton
    development only. Ubuntu rootfs, Pixi binary, llama.cpp release asset and the
    optional MobaXterm download are SHA-256 verified. Apt/Conda/npm retain their
-   upstream trust and supply-chain risks.
+   upstream trust and supply-chain risks. A writable `.git` inside the sandbox
+   (item 5) means a compromised or misled agent can alter this repository's
+   history; the release pipeline must therefore pin by tag and verify the
+   signature of what it downloads, not trust the working tree.
 2. WSL root provisions the boot mount helper, launchers and inference snapshot
    once. The root helper reads only `/etc/osint-ai.json`; no project shell code
    or config is sourced at boot. It mounts the Windows drive under a root-only
@@ -24,20 +27,32 @@ is guidance only.
    agent writes can change what runs next. `pixi r osint-pi-wsl` is a thin
    wrapper: the outer Pixi reads only that unmodifiable manifest, then execs the
    root-owned launcher, which enters bubblewrap before Pi starts. The
-   `agents` environment is also mounted read-only inside the sandbox, so a
+   `default` environment is also mounted read-only inside the sandbox, so a
    functional agent can use tools but cannot install or replace them.
 4. `sandbox.py` builds an allowlisted root filesystem with a cleared
-   environment: `/usr` etc. read-only, the Linux checkout read-only at
-   `/opt/osint-ai/project`, the functional workspace read-write at `/workspace`,
-   the persistent agent home at `/home/osint`. No `.git` from either checkout is
-   exposed. No blanket `/` bind, Windows drive, WSL interop socket, host `/run`
-   or host home enters the sandbox. Networking stays enabled.
-5. Git belongs to the human's Windows GUI. To let the assistant remind the user
-   about unsaved work, the launcher runs a read-only `git status` **outside** the
-   sandbox with hooks, fsmonitor, system config, global config and optional lock
-   files disabled, and exposes the summary read-only at `/run/git-status`. The
-   agent never gets a Git binary with a reachable repository, and never gets
-   credentials.
+   environment: `/usr` etc. read-only, the persistent agent home at
+   `/home/osint`, the functional workspace read-write at `/workspace`, and the
+   checkout the agent works in read-write **with its `.git`** — the Windows
+   checkout at `/mnt/osint-ai` in WSL, the project root itself in plain Linux.
+   In WSL the Linux checkout stays read-only at `/opt/osint-ai/project` with its
+   own `.git` masked by a tmpfs, so the code that starts the next session and
+   its history stay out of reach. In plain Linux, where the writable project root
+   also holds the Pixi environment, `.pixi` is re-bound read-only on top of it,
+   so the tools the assistant runs on still cannot be replaced from inside. No
+   blanket `/` bind, Windows drive other than the selected checkout, WSL interop
+   socket, host `/run` or host home enters the sandbox. Networking stays
+   enabled.
+5. The agent runs Git itself, in a real and writable repository, by deliberate
+   maintainer decision. `workspace/AGENTS.md` tells it to run `git status` and
+   forbids it to commit, push, switch branches or discard work, so the user
+   still reviews and publishes in the Windows GUI. That is guidance, not
+   enforcement: the sandbox would permit a commit, a `reset --hard` of the
+   user's uncommitted work, a history rewrite, or a push if WSL ever held a
+   credential. The installer never imports GitHub Desktop's credentials, so a
+   push is expected to fail; committing and destroying local work need no
+   credential at all. `tests/test_skeleton.py` asserts that a commit from inside
+   the sandbox succeeds, so this cannot quietly change. The launcher no longer
+   runs any Git itself.
 6. Inference intentionally runs outside bubblewrap under the ordinary WSL user.
    It never executes the project manifest or the project environment: its
    binaries, libraries and model presets are a root-owned snapshot with a
@@ -48,16 +63,26 @@ is guidance only.
    distro as root; protecting against the machine owner is not a goal.
 8. Delegation (pi-subagents) adds processes, not privileges. A child session is
    a fork inside the same bubblewrap namespace, so it inherits the same PID
-   namespace, the same cleared environment, the read-only project root and the
-   same writable `/workspace` and `/home/osint`. Nothing in pi-subagents
-   re-enters the launcher or rebinds a mount. The gaps are resource and
-   discovery, not isolation: several children can run at once against a local
-   server configured with `parallel = 1`, and the extension reads sub-agent
-   definitions from the project's legacy `.agents/**/*.md` tree, which here is
-   the user's skill directory. pi-subagents 0.71.0 excludes `.agents/skills/**`
-   from that scan, so a skill file is never loaded as an agent. No
-   `pi-intercom` extension is installed, so there is no session-messaging
-   broker to share or to isolate.
+   namespace, the same cleared environment and the same mounts: the read-only
+   program checkout, the read-only environment, and the writable agent checkout
+   with its `.git` (item 5). Nothing in pi-subagents re-enters the launcher or
+   rebinds a mount. The gaps are resource and discovery, not isolation: several
+   children can run at once against a local server configured with
+   `parallel = 1`, and the extension reads sub-agent definitions from the
+   project's legacy `.agents/**/*.md` tree, which here is the user's skill
+   directory. pi-subagents 0.71.0 excludes `.agents/skills/**` from that scan,
+   so a skill file is never loaded as an agent.
+9. Session messaging (pi-intercom) is a per-launch local broker on a Unix
+   socket in a fresh tmpfs at `~/.pi/agent/intercom`, created by the launcher
+   after the agent home is bound. The socket is created 0600 inside a 0700
+   directory, so it is reachable only from inside this sandbox, and a parent
+   session and its sub-agent children share it. A persistent home would let a
+   second terminal window unlink the running broker's socket at startup and
+   would redeliver mail queued for a closed session to a later one; the tmpfs
+   removes both. Nothing outside bubblewrap, including the host's own unsandboxed
+   Pi and the inference server, can reach the socket. Only the Unix transport is
+   used: the loopback-TCP escape hatch is not enabled, and it would be
+   reachable from any process on WSL loopback anyway.
 
 ## Explicit limitations
 
@@ -68,8 +93,9 @@ is guidance only.
   including inference and browser OAuth callback listeners. Network-mounted
   files/services are not covered by filesystem hiding.
 - The agent can delete or poison writable workspace content, skills, reports and
-  its own state. Human review, backups and Git history remain necessary.
-  Generated skills and scripts are code, not inert documents.
+  its own state, and it can rewrite the history of the checkout it works in.
+  Human review, backups and Git history remain necessary. Generated skills and
+  scripts are code, not inert documents.
 - Any user who runs edited project content outside the sandbox grants it normal
   WSL-user privileges. `pixi r install`, `pixi r update-project` and the Windows
   installer are trusted human operations, not startup paths and never agent
@@ -85,9 +111,21 @@ is guidance only.
   network. CPU-mode inference shares those limits with the assistant. A
   sub-agent run multiplies this: children are additional concurrent clients of
   the one inference server, and `models.ini` serves them one at a time.
-- Delegation cannot create a Git worktree. The sandbox exposes no `.git`, so the
-  extension's worktree-backed isolation always fails and its Git-dependent
-  features are unavailable, by design.
+- Delegation can create a Git worktree of the checkout the agent works in,
+  because that repository is writable. The branch and history it produces are
+  the user's to review; the same rule applies as for any other change. The Linux
+  checkout's repository stays masked in WSL, so no worktree of the program can be
+  made.
+- Each sandbox gets its own intercom broker, so two separate assistant windows
+  cannot message each other, and no message survives a restart. Both are
+  deliberate. Session messaging inside one window, including between a parent
+  and its sub-agents, is unaffected.
+- The intercom `config.json` lives in that tmpfs, so options such as
+  `inboundTrigger` and `confirmSend` cannot be set by the user and reset at
+  every launch. Inbound messages can start a turn in the receiving session, so a
+  sub-agent can prompt the parent. The user is told what happened; the user
+  cannot be addressed from inside the sandbox, because that would mean a
+  project-side bridge to the host, which this design does not have.
 - Browser, clipboard and Windows executable bridging are deliberately omitted.
   OAuth uses displayed URLs and manual copy/paste, not generic host execution.
   Global device access is absent from the agent; CUDA inference retains WSL GPU

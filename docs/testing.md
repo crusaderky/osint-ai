@@ -9,8 +9,10 @@ not touched by the installer.
 
 Run `python3 -m unittest discover -s tests -v` (or `pixi r test`). These cover
 manifest and recipe configuration, launcher argv construction for both the plain
-Linux and the Windows workspace, environment scrubbing, read-only project mount,
-actual bubblewrap filesystem isolation, the Git status summary, CPU-versus-GPU
+Linux and the Windows workspace, environment scrubbing, the read-only program
+mount and the writable agent checkout, actual bubblewrap filesystem isolation,
+Git inside the sandbox (including that a commit from inside succeeds, which is
+the documented consequence of a writable `.git`), CPU-versus-GPU
 backend selection and server process ownership/lifecycle with a fake local
 server. Integration tests explicitly skip when namespaces are blocked.
 
@@ -25,7 +27,7 @@ packages into temporary Linux storage):
 python3 tests/smoke_pixi_sandbox.py
 ```
 
-It installs the locked `agents` environment, launches real Pi inside bubblewrap
+It installs the locked `default` environment, launches real Pi inside bubblewrap
 with the Windows-workspace layout, and verifies `/models` registration plus
 discovery of a skill under `workspace/.agents/skills/`, without any model API
 calls. Also run Bash syntax checks and ShellCheck over `wsl/scripts`, and install
@@ -33,8 +35,10 @@ both Pixi environments to validate the local build recipes. Never claim Windows
 support based on the Python tests alone.
 
 The Linux suite checks that the extension pins and the Pi version are what the
-repository claims. It cannot show that delegation works: no test starts a child
-session, and none of them calls a model. See the checklist items on delegation.
+repository claims, and that the intercom runtime directory is mounted as a
+tmpfs. It cannot show that delegation works: no test starts a child session,
+delivers an intercom message, or calls a model. See the checklist items on
+delegation.
 
 ## Required Windows 11 x64 acceptance matrix
 
@@ -64,10 +68,14 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
 - [ ] Chatbot starts with `workspace/` of the Windows checkout as its directory.
       `/opt/osint-ai/project` is present and read-only; `pixi add` and writes to
       root files fail inside the session.
-- [ ] No `.git`, `C:\`, other drives, `\\wsl$`, `/dev/dxg`, WSL interop sockets
-      or host home directories are reachable from inside the session.
-- [ ] `/run/git-status` matches GitHub Desktop: clean, modified, untracked and
-      ahead-of-remote cases each produce the expected reminder wording.
+- [ ] No `C:\`, other drives, `\\wsl$`, `/dev/dxg`, WSL interop sockets or host
+      home directories are reachable from inside the session. The Linux
+      checkout's `.git` is absent, and `/opt/osint-ai/project` is read-only.
+- [ ] `git status` inside the session reports the Windows checkout, matches
+      GitHub Desktop for clean, modified, untracked and ahead-of-remote cases,
+      and the assistant's reminder wording is right. The assistant does not
+      commit, push, switch branches or discard anything on its own. Confirm by
+      hand that it does not, and treat any behaviour to the contrary as a bug.
 - [ ] New skill lands in `workspace\.agents\skills\<name>\SKILL.md`; Notepad
       sees it immediately and
       `/reload` + `/skill:<name>` find it. `workspace\AGENTS.md` is loaded and
@@ -88,9 +96,12 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       sessions, settings and extension state persist after a restart.
 - [ ] Delegation: the assistant hands a wide research job to a sub-agent, the
       child finishes, and the answer arrives with links and dates. The child
-      creates no file outside `workspace\`; it cannot read the Linux checkout,
-      `C:\`, or a `.git`; a child that asks for a Git worktree fails cleanly
-      instead of hanging. Note the extra time on a local model.
+      creates no file outside the checkout; it cannot read the Linux checkout's
+      code or history; note the extra time on a local model.
+- [ ] A blocked sub-agent can reach the chat it was started from, and a second
+      **OSINT AI Terminal** window does not steal the first window's intercom
+      broker. After a restart, no message from the previous session is
+      delivered. The socket is absent outside the sandbox.
 - [ ] No NVIDIA GPU: `restart-server` reports the CPU fallback, exits 0, the
       desktop chain continues, and a small model answers (slowly). Accept only a
       real answer, not `nvidia-smi` output.

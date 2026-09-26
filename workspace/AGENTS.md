@@ -15,7 +15,7 @@ you any files from their computer, they have to copy them here.
 Create every skill you are asked for at:
 
 ```text
-workspace/.agents/skills/<skill-name>/SKILL.md
+/workspace/.agents/skills/<skill-name>/SKILL.md
 ```
 
 * Helper scripts, reference notes and assets go beneath that same skill folder
@@ -37,31 +37,47 @@ When you create new skill files, always stage them with `git add`.
 
 ## Remind the user about unsaved and unsynced work — often
 
-The user saves work to Git with GitHub Desktop, not with you. You cannot run Git; you
-can only read a status summary by executing `git status` with the `bash` tool.
+You work in a real Git checkout and may run `git status` on it. The user saves
+and publishes work in GitHub Desktop, not with you: commit, push, branch
+switching and discarding changes are theirs, never yours.
 
-After you touch `AGENTS.md` or any skill, always remind the user to commit to git and
-push to github. If the file is missing or says Git status is unavailable, still remind
-in plain words.
+Run `git status` yourself — at the start of a session, again after you create or
+change files, and whenever you finish a unit of work. In WSL the checkout is at
+`/mnt/osint-ai`; in plain Linux it is the directory that holds `workspace/`.
+The checkout is your working directory's parent, so `git -C .. status` works
+from `/workspace`. Interpret it like this:
+
+* The first `##` line is the branch. `[ahead N]` means commits exist that
+  GitHub has not received: say **“Please open GitHub Desktop and press Push.”**
+* ` M ` or `M ` lines are changed files, `?? ` lines are new files: say
+  **“You have changes that Git has not saved yet. Please open GitHub Desktop,
+  tick the files, press Commit, then Push.”**
+* `[behind N]` means the team published new work: say **“Please press Pull
+  first, then type `/reload`.”**
+
+Always remind after you touch `AGENTS.md` or any skill. If `git status` fails,
+say so in plain words and remind anyway.
 
 Offer to help, without doing it yourself: list the changed files, suggest a
 one-line commit message such as `skill: add sanctions screening`, and stay with
-the user while they press Commit and Push in GitHub Desktop. You have no Git
-access on purpose, so never ask for credentials and never offer to commit or
-push for them.
+the user while they press Commit and Push in GitHub Desktop. Never ask for
+credentials, and never offer to commit or push for them.
 
 ## The program is elsewhere: do not try to change it
 
 This workspace and the program that runs the chatbot are **two different Git
 checkouts**. In WSL the program's checkout is mounted read-only at
-`/opt/osint-ai/project`; the root of the repository — `README.md`, `AGENTS.md`,
+`/opt/osint-ai/project`; the root of that repository — `README.md`, `AGENTS.md`,
 `pixi.toml`, `pixi.lock`, `wsl/`, `pixi-recipes/`, `tests/`, `docs/` — belongs
-to a developer, not to this workspace.
+to a developer, not to this workspace. The checkout you work in is the user's
+own research checkout (`/mnt/osint-ai` in WSL), and it is yours to edit and to
+read with `git status`. It is not the program.
 
 Consequences you must respect:
 
-* Editing a root file, for example adding a library to `pixi.toml`, has **no
-  effect** here. It is a different checkout, and the file is read-only.
+* Editing a file of the program, for example adding a library to its
+  `pixi.toml`, is read-only from here and has **no effect**. Ask the developer
+  of the project root checkout.
 * `pixi add`, `pip install` and `apt-get` are not available to you. Tools come
   from the project environment and are already on `PATH`.
 * If something is missing, say plainly what is missing and ask the user to
@@ -84,11 +100,11 @@ Rules for a sub-agent, and for the answer you build from it:
   the date it was accessed, plus its confidence label. A child that returns
   uncited claims has failed.
 * The child works in the same sandbox, the same model and the same rules as you.
-  It sees the read-only program at `/opt/osint-ai/project` and writes only under
-  `/workspace`, exactly like you.
-* The child has no Git access and cannot be given one. It also cannot create a
-  worktree; do not ask it to. Do not ask a child for a decision the user has to
-  make: ask the user.
+  It sees the read-only program at `/opt/osint-ai/project` and writes only in
+  the checkout you work in, exactly like you.
+* The child must never commit, push, switch branches or discard work, and must
+  not create a Git worktree; do not ask it to. Do not ask a child for a
+  decision the user has to make: ask the user.
 * Report the child's work in your own words, keep the user's confidence labels,
   and list what nobody could verify. Never present a child's guess as a finding.
 

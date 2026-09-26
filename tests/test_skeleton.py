@@ -35,26 +35,38 @@ class ConfigurationTests(unittest.TestCase):
     def test_manifest(self):
         data = tomllib.loads((ROOT / "pixi.toml").read_text())
         self.assertEqual(data["workspace"]["platforms"][0]["platform"], "linux-64")
-        self.assertEqual(data["feature"]["pi"]["dependencies"]["pi-coding-agent"], "=0.86.1")
-        self.assertEqual(data["environments"]["agents"], ["pi"])
+        self.assertIn("pi-coding-agent", data["feature"]["pi"]["dependencies"])
+        # The launcher looks the environment up by this name.
+        self.assertEqual(data["environments"][sandbox.ENV_NAME], ["pi"])
         self.assertTrue(data["environments"]["llamacpp-binary-cuda"]["no-default-feature"])
 
-    def test_extensions_are_pinned_and_match_the_manifest(self):
-        """Every extension is pinned, and the recipe builds against the same Pi."""
-        data = tomllib.loads((ROOT / "pixi.toml").read_text())
-        version = data["feature"]["pi"]["dependencies"]["pi-coding-agent"].lstrip("=")
+    def test_extensions_are_pinned_and_built_against_the_locked_pi(self):
+        """Every extension is pinned, and the locked Pi satisfies their peers.
+
+        The manifest floats ``pi-coding-agent`` and so does the recipe
+        requirement, so the lock is what decides the Pi the extensions are
+        installed with. pi-subagents 0.71.0 declares
+        ``@earendil-works/pi-ai >=0.86.1``; a re-lock that resolves anything
+        older silently breaks delegation, so the floor is asserted against the
+        lock rather than against a version string in the manifest.
+        """
         recipe = (ROOT / "pixi-recipes/pi-extensions/recipe.yaml").read_text()
         build = re.search(r"PLUGINS: >-\n(?P<plugins>(?: {8}\S+\n)+)", recipe)
         self.assertIsNotNone(build, "PLUGINS must be a space-separated pin list")
         plugins = build.group("plugins").split()
+        self.assertIn("pi-intercom@0.14.0", plugins)
         self.assertIn("pi-subagents@0.71.0", plugins)
         for plugin in plugins:
             self.assertRegex(plugin, r"^(@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+$", plugin)
-        # The recipe installs the extensions with the Pi the environment pins,
-        # so a bump of one cannot silently build the plugins against the other.
+        # Extensions are installed by a recipe that needs Pi at build time.
         requirements = re.search(r"requirements:\n(?P<body>(?: {2,4}\S.*\n)+)", recipe).group("body")
-        pinned = set(re.findall(r"pi-coding-agent =(\S+)", requirements))
-        self.assertEqual(pinned, {version})
+        self.assertEqual(len(re.findall(r"^\s+- pi-coding-agent", requirements, re.M)), 2)
+        locked = set(re.findall(r"pi-coding-agent-(\d+\.\d+\.\d+)", (ROOT / "pixi.lock").read_text()))
+        self.assertEqual(len(locked), 1, "the lock must resolve exactly one Pi version")
+        version = tuple(int(part) for part in locked.pop().split("."))
+        self.assertGreaterEqual(
+            version, (0, 86, 1), "pi-subagents@0.71.0 requires @earendil-works/pi-ai >=0.86.1"
+        )
 
     def test_manifest_tools_and_tasks(self):
         data = tomllib.loads((ROOT / "pixi.toml").read_text())
@@ -93,7 +105,7 @@ class ConfigurationTests(unittest.TestCase):
         its system prompt. The check uses the extension's own discovery, so it
         tracks the installed version instead of re-implementing its rules.
         """
-        environment = ROOT / ".pixi/envs/agents"
+        environment = ROOT / f".pixi/envs/{sandbox.ENV_NAME}"
         node = environment / "bin/node"
         package = environment / "home/.pi/agent/npm/node_modules/pi-subagents/src/agents/agents.js"
         if not node.is_file() or not package.is_file():
@@ -122,6 +134,20 @@ class ConfigurationTests(unittest.TestCase):
         # The extension's own agents are still discovered, so the probe is real.
         self.assertIn("researcher", names)
 
+    def test_packaged_intercom_can_start_its_broker_offline(self):
+        """pi-intercom's entry point is TypeScript, so the broker needs a runner.
+
+        The broker spawn resolves ``tsx`` next to the extension and only falls
+        back to ``npx --no-install tsx``, which needs an npm cache. Both files
+        must be part of the packaged extension tree, or starting the broker
+        inside the sandbox would try to reach the network.
+        """
+        modules = ROOT / f".pixi/envs/{sandbox.ENV_NAME}/home/.pi/agent/npm/node_modules"
+        if not modules.is_dir():
+            self.skipTest(f"the {sandbox.ENV_NAME} environment is not installed")
+        self.assertTrue((modules / "pi-intercom/index.ts").is_file(), "TypeScript entry point")
+        self.assertTrue((modules / "tsx/dist/cli.mjs").is_file(), "bundled tsx runner")
+
     def test_skill_discovery_and_guidance(self):
         settings = json.loads((ROOT / "pixi-recipes/pi-home/settings.json").read_text())
         self.assertEqual(settings["skills"], [SKILLS_PATH])
@@ -140,8 +166,8 @@ class ConfigurationTests(unittest.TestCase):
         for forbidden in ("~/.pi", "~/.agents", ".pi/skills"):
             self.assertIn(forbidden, workspace_guide)
         # Reminders about uncommitted work are documented where the agent reads them.
-        self.assertIn("/run/git-status", workspace_guide)
-        self.assertIn("/run/git-status", (ROOT / "pixi-recipes/pi-home/AGENTS.md").read_text())
+        self.assertIn("git status", workspace_guide)
+        self.assertIn("git status", (ROOT / "pixi-recipes/pi-home/AGENTS.md").read_text())
 
     def test_bundled_skills_are_valid(self):
         skills = ROOT / "workspace/.agents/skills"
@@ -442,8 +468,8 @@ class SandboxFixture(unittest.TestCase):
         self.workspace = self.project / "workspace"
         self.state = self.root / "linux state"
         (self.project / ".git").mkdir(parents=True)
-        (self.project / ".pixi/envs/agents/bin").mkdir(parents=True)
-        (self.project / ".pixi/envs/agents/bin/pi").write_text("#!/bin/sh\n")
+        (self.project / f".pixi/envs/{sandbox.ENV_NAME}/bin").mkdir(parents=True)
+        (self.project / f".pixi/envs/{sandbox.ENV_NAME}/bin/pi").write_text("#!/bin/sh\n")
         (self.workspace / ".agents/skills").mkdir(parents=True)
         (self.project / "wsl/scripts").mkdir(parents=True)
         (self.state / "agent-home").mkdir(parents=True)
@@ -480,10 +506,10 @@ class SandboxArgumentTests(SandboxFixture):
         self.assertNotIn("secret", args)
         self.assertNotIn("/", args)
         self.assertNotIn("--dev-bind", args)
-        # The project root is read-only; only the workspace is writable.
+        # Plain Linux has one checkout: the agent works in it, so it is writable.
         self.assertIn(
             (str(self.project), "/opt/osint-ai/project"),
-            [(args[i + 1], args[i + 2]) for i, a in enumerate(args) if a == "--ro-bind"],
+            [(args[i + 1], args[i + 2]) for i, a in enumerate(args) if a == "--bind"],
         )
         self.assertIn(
             (str(self.workspace), "/workspace"),
@@ -491,17 +517,95 @@ class SandboxArgumentTests(SandboxFixture):
         )
         self.assertEqual(args[args.index("--chdir") + 1], "/workspace")
 
+    def test_the_agents_git_repository_is_reachable(self):
+        """The agent must be able to run Git itself, in a real repository.
+
+        It is allowed to see `.git` and to write to it; the human still reviews
+        every change, which `AGENTS.md` states. What must not come back is a
+        read-only view that makes `git status` fail, or a hidden `.git` that
+        silently breaks every reminder.
+        """
+        args = self.argv()
+        pairs = [(args[i], args[i + 1]) for i, a in enumerate(args) if a.startswith("--")]
+        # Plain Linux: nothing is layered over `.git`, so Git works in place.
+        self.assertNotIn(("--tmpfs", "/opt/osint-ai/project/.git"), pairs)
+        self.assertNotIn(("--ro-bind", "/opt/osint-ai/project/.git"), pairs)
+        self.assertNotIn("--remount-ro", args)
+        # The environment the agent runs on is the one thing in the writable
+        # tree it must not be able to replace.
+        self.assertIn(
+            (str(self.project / ".pixi"), "/opt/osint-ai/project/.pixi"),
+            [(args[i + 1], args[i + 2]) for i, a in enumerate(args) if a == "--ro-bind"],
+        )
+        self.assertEqual(
+            (self.project / ".git" / "config").read_text(), "private git configuration"
+        )
+
+    def test_wsl_mode_gives_the_agent_the_windows_checkout(self):
+        """WSL has two checkouts: the Windows one is the agent's, the Linux one is not.
+
+        The Windows checkout is bound read-write, `.git` included, so `git
+        status` describes the files the user commits from GitHub Desktop. The
+        Linux checkout keeps the code that starts Pi out of reach, `.git`
+        included.
+        """
+        mount = self.root / "mnt-osint-ai"
+        windows = mount / "workspace"
+        (mount / ".git").mkdir(parents=True)
+        windows.mkdir()
+        with patch.object(sandbox, "WINDOWS_MOUNT", mount):
+            args = self.argv(workspace=windows, mode="wsl")
+        binds = [(args[i + 1], args[i + 2]) for i, a in enumerate(args) if a == "--bind"]
+        ro_binds = [(args[i + 1], args[i + 2]) for i, a in enumerate(args) if a == "--ro-bind"]
+        self.assertIn((str(mount), str(mount)), binds)
+        self.assertIn((str(windows), "/workspace"), binds)
+        self.assertIn((str(self.project), "/opt/osint-ai/project"), ro_binds)
+        # The Windows checkout is writable through its own path, with no
+        # read-only or empty overlay on top of its repository.
+        pairs = [(args[i], args[i + 1]) for i, a in enumerate(args) if a.startswith("--")]
+        self.assertNotIn(("--tmpfs", str(mount / ".git")), pairs)
+        self.assertNotIn(("--ro-bind", str(mount / ".git")), pairs)
+        # The Linux checkout's history stays hidden behind the program mount.
+        self.assertIn(("--tmpfs", "/opt/osint-ai/project/.git"), pairs)
+        self.assertEqual(args[args.index("--chdir") + 1], "/workspace")
+
+    def test_intercom_state_is_a_private_tmpfs(self):
+        """pi-intercom's broker state must not land in the persistent home.
+
+        A shared home would let a second sandbox unlink the live broker's
+        socket and would redeliver mail queued for a closed session. The mount
+        must come after the agent home so it shadows only that subdirectory,
+        and it must be a tmpfs, not a bind.
+        """
+        args = self.argv()
+        mounts = [(args[i], args[i + 1]) for i, a in enumerate(args) if a.startswith("--")]
+        self.assertIn(("--tmpfs", sandbox.INTERCOM_DIR), mounts)
+        self.assertNotIn(("--bind", sandbox.INTERCOM_DIR), mounts)
+        self.assertNotIn(("--ro-bind", sandbox.INTERCOM_DIR), mounts)
+        home_index = args.index("/home/osint")
+        self.assertEqual(args[home_index - 2 : home_index], ["--bind", str(self.state / "agent-home")])
+        self.assertGreater(args.index(sandbox.INTERCOM_DIR), home_index)
+        self.assertEqual(args[args.index(sandbox.INTERCOM_DIR) - 1], "--tmpfs")
+        # Only the intercom subdirectory is private: the rest of the home, the
+        # workspace and the read-only project stay as the boundary requires.
+        self.assertTrue(sandbox.INTERCOM_DIR.startswith("/home/osint/.pi/agent/"))
+
     def test_environment_points_at_read_only_tools(self):
         args = self.argv()
         env = {args[i + 1]: args[i + 2] for i, a in enumerate(args) if a == "--setenv"}
-        self.assertEqual(env["CONDA_PREFIX"], "/opt/osint-ai/project/.pixi/envs/agents")
-        self.assertTrue(env["PATH"].startswith("/opt/osint-ai/project/.pixi/envs/agents/bin:"))
+        self.assertEqual(
+            env["CONDA_PREFIX"], f"/opt/osint-ai/project/.pixi/envs/{sandbox.ENV_NAME}"
+        )
+        self.assertTrue(
+            env["PATH"].startswith(f"/opt/osint-ai/project/.pixi/envs/{sandbox.ENV_NAME}/bin:")
+        )
         self.assertEqual(env["HOME"], "/home/osint")
         self.assertEqual(env["OSINT_SANDBOX"], "1")
         self.assertEqual(json.loads(base64.b64decode(env["OSINT_PI_ARGS"])), [])
 
-    def test_wsl_mode_swaps_the_workspace_only(self):
+    def test_wsl_mode_also_swaps_the_workspace(self):
         windows = self.root / "mnt-osint-ai/workspace"
+        (windows.parent / ".git").mkdir(parents=True)
         windows.mkdir(parents=True)
         native = self.argv()
         wsl = self.argv(workspace=windows, mode="wsl")
@@ -510,7 +614,7 @@ class SandboxArgumentTests(SandboxFixture):
             [(wsl[i + 1], wsl[i + 2]) for i, a in enumerate(wsl) if a == "--bind"],
         )
         self.assertNotIn(str(self.workspace), wsl)
-        # Everything else is identical: same read-only code, same entry point.
+        # The entry point, the environment and the working directory are the same.
         self.assertIn("/opt/osint-ai/project", native)
         self.assertEqual(native[native.index("--chdir") :], wsl[wsl.index("--chdir") :])
 
@@ -538,7 +642,7 @@ class SandboxArgumentTests(SandboxFixture):
             sandbox.check_storage("native", self.project, self.project, self.state)
 
     def test_missing_environment_is_reported(self):
-        (self.project / ".pixi/envs/agents/bin/pi").unlink()
+        (self.project / f".pixi/envs/{sandbox.ENV_NAME}/bin/pi").unlink()
         with self.assertRaisesRegex(RuntimeError, "environment is not installed"):
             sandbox.check_storage("native", self.project, self.workspace, self.state)
 
@@ -560,6 +664,7 @@ class SandboxArgumentTests(SandboxFixture):
     def test_wsl_mode_accepts_the_mounted_workspace(self):
         mount = self.root / "mnt-osint-ai"
         windows = mount / "workspace"
+        (mount / ".git").mkdir(parents=True)
         windows.mkdir(parents=True)
         with (
             patch.object(sandbox, "WINDOWS_MOUNT", mount),
@@ -567,11 +672,31 @@ class SandboxArgumentTests(SandboxFixture):
         ):
             sandbox.check_storage("wsl", self.project, windows, self.state)
 
+    def test_wsl_mode_requires_a_real_git_checkout(self):
+        mount = self.root / "mnt-osint-ai"
+        windows = mount / "workspace"
+        windows.mkdir(parents=True)
+        with (
+            patch.object(sandbox, "WINDOWS_MOUNT", mount),
+            patch.object(sandbox.os.path, "ismount", return_value=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "not a Git checkout"):
+                sandbox.check_storage("wsl", self.project, windows, self.state)
+
     def test_worktree_git_file_rejected(self):
+        """A `.git` that is a gitdir pointer is refused, not followed."""
         shutil.rmtree(self.project / ".git")
         (self.project / ".git").write_text("gitdir: /elsewhere")
-        with self.assertRaisesRegex(RuntimeError, "real directory"):
-            self.argv(["/bin/true"])
+        mount = self.root / "mnt-osint-ai"
+        (mount / ".git").mkdir(parents=True)
+        windows = mount / "workspace"
+        windows.mkdir(parents=True)
+        with (
+            patch.object(sandbox, "WINDOWS_MOUNT", mount),
+            patch.object(sandbox.os.path, "ismount", return_value=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "real directory"):
+                self.argv(["/bin/true"], workspace=windows, mode="wsl")
 
     def test_mount_helper_rejects_symlink(self):
         link = self.root / "link"
@@ -587,7 +712,9 @@ class SandboxArgumentTests(SandboxFixture):
         self.assertIn("--wsl", (SCRIPTS / "install/osint-pi-wsl").read_text())
 
 
-class GitStatusTests(SandboxFixture):
+class AgentGitTests(SandboxFixture):
+    """The agent runs Git in the checkout it works in; this is what it sees."""
+
     def setUp(self):
         super().setUp()
         if not shutil.which("git"):
@@ -615,29 +742,78 @@ class GitStatusTests(SandboxFixture):
             capture_output=True,
         )
 
-    def snapshot(self):
-        destination = self.state / "git-status"
-        sandbox.git_status_snapshot(self.project, destination)
-        return destination.read_text()
-
-    def test_clean_and_dirty_states_are_described(self):
+    def sandbox_git_status(self, command=None):
+        """Run `git status` from the sandbox's working directory, if possible."""
+        if not Path("/usr/bin/bwrap").exists():
+            self.skipTest("system bubblewrap is not installed")
         self.git("init", "-q", "-b", "main")
         self.git("add", "-A")
         self.git("commit", "-qm", "initial")
-        clean = self.snapshot()
-        self.assertIn("## main", clean)
-        self.assertNotIn(" M ", clean)
+        probe = subprocess.run(self.argv(["/bin/true"]), capture_output=True, text=True, check=False)
+        if probe.returncode:
+            self.skipTest("unprivileged bubblewrap unavailable: " + probe.stderr.strip())
+        result = subprocess.run(
+            self.argv(["git", "status", "--porcelain=v1", "-b"]),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_a_clean_and_a_dirty_checkout_are_both_reported(self):
+        self.git("init", "-q", "-b", "main")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "initial")
         (self.workspace / "AGENTS.md").write_text("changed rule")
         (self.workspace / "new-skill.txt").write_text("new")
-        dirty = self.snapshot()
-        self.assertIn("workspace/AGENTS.md", dirty)
-        self.assertIn("?? workspace/new-skill.txt", dirty)
-        self.assertIn("reminding", dirty)
+        status = self.sandbox_git_status()
+        self.assertIn("## main", status)
+        self.assertIn("workspace/AGENTS.md", status)
+        self.assertIn("?? workspace/new-skill.txt", status)
+        # The change is the real file on the host, not a sandbox-local copy.
+        self.assertEqual((self.workspace / "AGENTS.md").read_text(), "changed rule")
 
-    def test_failure_is_reported_not_raised(self):
-        destination = self.state / "git-status"  # setUp removed the repository
-        self.assertIn("No Git repository", self.snapshot())
-        self.assertTrue(destination.is_file())
+    def test_the_agent_could_write_to_git(self):
+        """Documents the consequence of a writable `.git` on purpose.
+
+        The sandbox does not stop the agent from committing; the human reviews
+        the diff. This test exists so nobody removes that fact from the docs by
+        accident, and so the permission is a decision rather than an accident.
+        """
+        if not Path("/usr/bin/bwrap").exists():
+            self.skipTest("system bubblewrap is not installed")
+        self.git("init", "-q", "-b", "main")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "initial")
+        probe = subprocess.run(self.argv(["/bin/true"]), capture_output=True, text=True, check=False)
+        if probe.returncode:
+            self.skipTest("unprivileged bubblewrap unavailable: " + probe.stderr.strip())
+        result = subprocess.run(
+            self.argv(
+                [
+                    "git",
+                    "-c",
+                    "user.name=agent",
+                    "-c",
+                    "user.email=agent@example.com",
+                    "commit",
+                    "-qm",
+                    "written from inside the sandbox",
+                ]
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        log = subprocess.run(
+            ["git", "-C", str(self.project), "log", "--oneline", "-1"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertIn("written from inside the sandbox", log.stdout)
 
 
 class SandboxBoundaryTests(SandboxFixture):
@@ -650,27 +826,22 @@ class SandboxBoundaryTests(SandboxFixture):
 
     def test_real_filesystem_boundary(self):
         self.require_bwrap()
-        status = self.state / "git-status"
-        status.write_text("## main\n")
         code = textwrap.dedent("""
             import os
             from pathlib import Path
+            import subprocess
             import sys
             assert not Path(sys.argv[1]).exists(), 'host secret exposed'
             assert not Path('/mnt/c').exists()
-            assert not Path('/mnt/osint-ai').exists()
             assert not Path('/init').exists()
             assert not Path('/dev/dxg').exists()
-            assert [p.name for p in Path('/run').iterdir()] == ['git-status']
-            assert Path('/run/git-status').read_text() == '## main\\n'
-            assert not Path('/opt/osint-ai/project/.git/config').exists()
+            assert list(Path('/run').iterdir()) == [], '/run is an empty private tmpfs'
             assert Path('/opt/osint-ai/project/pixi.toml').read_text() == 'project manifest'
+            # The agent's own repository is reachable and writable in plain Linux.
+            assert Path('/opt/osint-ai/project/.git/config').read_text() == 'private git configuration'
+            assert subprocess.run(['git', 'status', '--porcelain'], cwd='/opt/osint-ai/project').returncode == 0
             assert not os.environ.get('AWS_SECRET_ACCESS_KEY')
-            for p in ['/opt/osint-ai/project/.git/config',
-                      '/opt/osint-ai/project/pixi.toml',
-                      '/opt/osint-ai/project/wsl/scripts/protected',
-                      '/run/git-status',
-                      '/etc/hosts']:
+            for p in ['/etc/hosts']:
                 try:
                     Path(p).write_text('should fail')
                 except OSError:
@@ -687,7 +858,7 @@ class SandboxBoundaryTests(SandboxFixture):
         """)
         with patch.dict(os.environ, {"AWS_SECRET_ACCESS_KEY": "must-not-leak"}):
             result = subprocess.run(
-                self.argv(["/usr/bin/python3", "-c", code, str(self.secret)], git_status=status),
+                self.argv(["/usr/bin/python3", "-c", code, str(self.secret)]),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -698,6 +869,41 @@ class SandboxBoundaryTests(SandboxFixture):
             (self.workspace / ".agents/skills/new-skill/SKILL.md").read_text(), "new skill"
         )
         self.assertEqual((self.state / "agent-home/state").read_text(), "persistent")
+
+    def test_wsl_filesystem_boundary(self):
+        """In WSL the program checkout stays read-only; the Windows one does not."""
+        self.require_bwrap()
+        mount = self.root / "mnt-osint-ai"
+        (mount / ".git").mkdir(parents=True)
+        (mount / ".git" / "config").write_text("windows repository")
+        (mount / "AGENTS.md").write_text("windows instructions")
+        windows = mount / "workspace"
+        windows.mkdir(parents=True)
+        code = textwrap.dedent("""
+            from pathlib import Path
+            # The agent works here, and this is the repository it reports on.
+            assert Path('/mnt/osint-ai/AGENTS.md').read_text() == 'windows instructions'
+            assert Path('/mnt/osint-ai/.git/config').read_text() == 'windows repository'
+            Path('/mnt/osint-ai/AGENTS.md').write_text('edited by the agent')
+            # The Linux checkout is code only: read-only, and no repository.
+            assert Path('/opt/osint-ai/project/pixi.toml').read_text() == 'project manifest'
+            assert not Path('/opt/osint-ai/project/.git/config').exists()
+            for p in ['/opt/osint-ai/project/pixi.toml', '/opt/osint-ai/project/.git']:
+                try:
+                    Path(p).write_text('should fail')
+                except OSError:
+                    pass
+                else:
+                    raise AssertionError('unexpected write: ' + p)
+        """)
+        with (
+            patch.object(sandbox, "WINDOWS_MOUNT", mount),
+            patch.object(sandbox.os.path, "ismount", return_value=True),
+        ):
+            args = self.argv(["/usr/bin/python3", "-c", code], workspace=windows, mode="wsl")
+            result = subprocess.run(args, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((mount / "AGENTS.md").read_text(), "edited by the agent")
         self.assertEqual((self.project / "pixi.toml").read_text(), "project manifest")
 
     def test_cwd_is_the_workspace(self):

@@ -118,6 +118,11 @@ installation to link it to your GitHub account first.
 Commit, then Push. That order is enough to remember. Everything you do in this
 project ends with those two buttons.
 
+The assistant can see this folder and run `git status` on it, so it can tell you
+what is not saved yet. It is told never to commit, push or throw work away —
+that stays your job, in GitHub Desktop. If it ever offers to press those buttons
+for you, say no and check what it changed.
+
 ## Talking to the assistant (the commands you need)
 
 Type a slash, then a word, then Enter.
@@ -155,6 +160,12 @@ on a local model a sub-agent job can be slow. Say plainly what you want, for
 example *"Check the four registries in parallel and tell me what you could not
 verify"*, and keep one subject per request. If you would rather it answer
 directly, say so — that is a normal request.
+
+If a sub-agent gets stuck and needs a decision, it can ask the chat it was
+started from, and the question appears in that window. One window at a time is
+connected: if you open a second **OSINT AI Terminal**, each gets its own private
+channel and neither can reach the other, and nothing is left behind for the next
+session.
 
 ## AGENTS.md: the rulebook
 

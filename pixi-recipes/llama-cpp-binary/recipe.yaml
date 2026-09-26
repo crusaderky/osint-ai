@@ -2,12 +2,12 @@
 context:
   backend: ${{ backend }}
   fork: Anbeeld/beellama.cpp
-  version: v0.4.6
+  version: v0.4.7
   asset_prefix: beellama
 
 package:
   name: llama-cpp
-  version: "0.4.6"
+  version: "0.4.7"
 
 source:
   url: https://github.com/${{ fork }}/releases/download/${{ version }}/${{ asset_prefix }}-${{ version }}-bin-ubuntu-cuda-13.3-x64.tar.gz

@@ -25,16 +25,19 @@ solutions and explain results in plain language.
 
 In WSL the repository exists twice, by design:
 
-* `/home/osint/osint-ai` — Linux checkout. Owns Git, Pixi environments and the
-  code that executes. Updated by a maintainer with `update-project`.
+* `/home/osint/osint-ai` — Linux checkout. Owns `pixi.toml`, the Pixi
+  environments and the code that executes. Updated by a maintainer with
+  `update-project`. Mounted read-only in the sandbox, with its `.git` masked.
 * `C:\Users\<name>\osint-ai`, mounted at `/mnt/osint-ai` — Windows checkout. The
-  user edits `workspace/` there and commits with a Windows Git GUI.
+  user edits `workspace/` there and commits with a Windows Git GUI. Bound
+  read-write in the sandbox, `.git` included, so the assistant can run
+  `git status` itself; it is told never to commit, push or discard work.
 
 `osint-pi-wsl` binds the Linux checkout **read-only** at `/opt/osint-ai/project`
-and the Windows `workspace/` **read-write** at `/workspace`. The sandboxed agent
-sees neither root file, neither `.git`, and cannot change the program. Tell the
-user that root-level changes must be made in the project root checkout, then
-`update-project`d on the WSL side.
+and the Windows checkout **read-write** at `/mnt/osint-ai`; the sandboxed agent
+sees neither root-owned file, and cannot change the program. Tell the user that
+changes to the program's own files must be made in the project root checkout,
+then `update-project`d on the WSL side.
 
 ## Tasks
 
@@ -44,11 +47,11 @@ pixi r osint-pi             # chatbot in workspace/ of this checkout (plain Linu
 pixi r osint-pi-wsl         # chatbot in workspace/ of the Windows checkout
 pixi r install              # installation check and usage summary
 pixi r restart-server       # local inference (CPU fallback when no CUDA device works)
-pixi r update-project       # trusted: git pull --ff-only + pixi install --locked -e agents
+pixi r update-project       # trusted: git pull --ff-only + pixi install --locked -e default
 ```
 
 For code maintenance you run Pi yourself, unsandboxed, in this checkout:
-`pixi shell -e agents` and then `pi`. That is different from the sandboxed
+`pixi shell -e default` and then `pi`. That is different from the sandboxed
 assistant, which always works in `workspace/`.
 
 `pixi r osint-pi*` and `pixi r *-server` are thin wrappers: they exec the
@@ -59,7 +62,7 @@ Adding or updating a dependency is a project-root job:
 ```bash
 pixi add <conda-package>            # or: pixi add --pypi <package>
 pixi lock                            # keep pixi.lock in step
-pixi install -e agents && pixi r test
+pixi install -e default && pixi r test
 ```
 
 Commit `pixi.toml` **and** `pixi.lock` together. Inside the sandbox the
@@ -75,10 +78,12 @@ dependencies; it must ask instead.
 * Never write API keys, tokens, model weights, Pi sessions or anything personal
   into the checkout.
 * Keep the security boundaries described in [`docs/security.md`](docs/security.md)
-  intact: bubblewrap before Pi, allowlisted mounts, cleared environment, no
-  `.git` inside the sandbox, no writable copy of the inference runtime, no
-  Windows drive other than the mounted checkout, and no project code executed
-  outside the sandbox at boot or startup.
+  intact: bubblewrap before Pi, allowlisted mounts, cleared environment, the
+  program checkout read-only with its repository masked, no writable copy of the
+  inference runtime, no Windows drive other than the selected checkout, and no
+  project code executed outside the sandbox at boot or startup. The agent's own
+  checkout is writable on purpose, `.git` included; guidance forbids it from
+  publishing, and the human reviews every change.
 * Do not add passwordless `sudo`, do not load shell code from `workspace/`, and
   do not let the boot helper read anything but `/etc/osint-ai.json`.
 * Functional guidance belongs to the functional workspace: user-facing skill

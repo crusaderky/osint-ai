@@ -9,28 +9,39 @@ Adapted from the adjacent `pixi-llm-recipes` checkout supplied for this task:
   checksum-verified rattler-build source. No CPU/Vulkan/ROCm or Windows-native
   binary paths. The server starts this build on the CPU when no CUDA device is
   present.
-- `pi`: conda-forge pi-coding-agent 0.86.1; Linux only. Bumped from 0.85.1 for
-  `pi-subagents`, whose peer requirement is `@earendil-works/pi-ai >=0.86.1`;
-  0.86.1 is also the host baseline for its dynamic tool activation.
+- `pi`: conda-forge pi-coding-agent, floating in the manifest and locked at
+  0.86.1; Linux only. Raised from 0.85.1 for `pi-subagents`, whose peer
+  requirement is `@earendil-works/pi-ai >=0.86.1`; 0.86.1 is also the host
+  baseline for its dynamic tool activation. A future re-lock below that floor
+  breaks delegation, which a test in `tests/test_skeleton.py` now checks.
 - `pi-extensions`: retained pinned pi-llama-cpp, pi-web-access, pi-token-speed,
-  and ask-user-question, and added pinned pi-subagents 0.71.0 for delegation.
-  Dropped developer-only btw/caveman/usage extensions, intercom and rtk command
-  rewriting. Removed shell and Windows-specific build variants. pi-subagents
-  costs about 3.5k of system prompt. It reads sub-agent definitions from the
-  project's legacy `.agents/**/*.md` tree, where this project's skills live, but
-  0.71.0 skips `.agents/skills/**` itself, so no exclusion setting is needed;
-  verified with the extension's own discovery, which reported only its 14
-  bundled agents.
+  and ask-user-question, and added pinned pi-intercom 0.14.0 and pi-subagents
+  0.71.0 for delegation. Dropped developer-only btw/caveman/usage extensions and
+  rtk command rewriting. Removed shell and Windows-specific build variants.
+  pi-subagents costs about 3.5k of system prompt. It reads sub-agent
+  definitions from the project's legacy `.agents/**/*.md` tree, where this
+  project's skills live, but 0.71.0 skips `.agents/skills/**` itself, so no
+  exclusion setting is needed; verified with the extension's own discovery,
+  which reported only its 14 bundled agents. pi-intercom 0.14.0 ships a
+  TypeScript entry point and its own `tsx` dependency, so its broker starts
+  from the packaged tree with no network fetch; unlike the source recipe, the
+  intercom runtime directory is a per-launch tmpfs rather than a path in the
+  read-only environment.
 - `pi-home`: retained the package structure, keybindings and web-search config;
   replaced global guidance with the functional workspace's instructions and added
   local llama server defaults. Skills are discovered at
   `/workspace/.agents/skills`. Removed the `use-gh-cli` skill because Git belongs
   to Windows.
 - `bwrap-pi.sh` / `sandbox.py`: replaced the blanket root bind with an explicit
-  allowlist, added Linux-filesystem validation, removed Git credential sharing
-  and skill rsync-back, and moved containment before Pi starts. Supports the two
-  deployment modes: the workspace of the current checkout, or the workspace of
-  the Windows checkout mounted at `/mnt/osint-ai`.
+  allowlist, added Linux-filesystem validation, removed skill rsync-back, and
+  moved containment before Pi starts. Supports the two deployment modes: the
+  workspace of the current checkout, or the workspace of the Windows checkout
+  mounted at `/mnt/osint-ai`. Not copied from upstream: the agent's own checkout
+  is bound read-write with its `.git` (upstream masks `.git` and hands over a
+  launcher-written summary instead), and the launcher-written summary and the
+  per-launch intercom tmpfs that upstream needed to keep `$CONDA_PREFIX` clean
+  are both unnecessary here, where the environment is read-only and the agent
+  home is already a separate persistent directory.
 - `pixi r install`: simplified to installation checks and usage guidance;
   first-time privileged setup lives in the Windows bootstrap/WSL provisioning.
 

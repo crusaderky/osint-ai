@@ -64,7 +64,7 @@ The installer:
   distributions unchanged, plus the Windows checkout.
 - Verifies pinned Ubuntu and Pixi downloads and never resets an existing
   checkout; it never pulls, discards or deletes user content.
-- Clones the Linux checkout and installs the `agents` environment inside it.
+- Clones the Linux checkout and installs the `default` environment inside it.
 - Provisions root-owned launchers, the boot mount helper, the AppArmor bwrap
   profile and an inference runtime snapshot.
 - Reuses an existing MobaXterm installation or downloads the pinned, checksum
@@ -95,17 +95,20 @@ does not elevate or execute root commands from the checkout.
 | --- | --- |
 | Windows checkout | Everything the user commits: `workspace/AGENTS.md`, `workspace/.agents/skills/`, reports |
 | `/mnt/osint-ai` | That checkout, bind-mounted from DrvFS by the root-owned boot hook |
-| `/home/osint/osint-ai` | Linux checkout: Git, `pixi.toml`, `.pixi`, code that runs |
-| `/opt/osint-ai/project` | The Linux checkout inside the sandbox, read-only |
-| `/workspace` | `/mnt/osint-ai/workspace` inside the sandbox, read-write; Pi's working directory |
+| `/home/osint/osint-ai` | Linux checkout: `pixi.toml`, `.pixi`, code that runs |
+| `/opt/osint-ai/project` | The Linux checkout inside the sandbox, read-only, with its `.git` masked |
+| `/mnt/osint-ai` | The Windows checkout inside the sandbox, read-write with `.git`; `/workspace` is its `workspace/` subdirectory |
+| `/workspace` | The functional workspace, read-write; Pi's working directory |
 | `/var/lib/osint-ai/agent-home` | Persistent sandbox home: Pi credentials, sessions, settings, caches |
-| `/var/lib/osint-ai/git-status` | Launcher-written Git summary exposed read-only at `/run/git-status` |
 | `/opt/osint-ai/server` | Root-owned inference runtime and `models.ini` snapshot |
 | `/var/lib/osint-ai/models` | Downloaded model cache |
 | `/var/lib/osint-ai/server-state/llama-server.log` | Inference server log |
 
-The sandbox never sees a `.git` directory, the Windows drive root, other drives,
-host homes, WSL interop sockets or GPU devices. Networking stays enabled.
+Inside the sandbox the agent works in a real Git checkout: it can read the whole
+history and, with `.git` writable, commit or discard work. Guidance tells it not
+to, and the user reviews the diff. It never sees the Windows drive root, other
+drives, host homes, WSL interop sockets or GPU devices, and in WSL it never sees
+the Linux checkout's own repository. Networking stays enabled.
 `osint-pi` (plain Linux) and `osint-pi-wsl` (Windows workspace) are the same
 launcher with a different workspace source; both enter bubblewrap before Pi
 starts, and both mount the environment that supplies Pi read-only.
@@ -123,7 +126,7 @@ and the limits that still need Windows validation.
 | `pixi r osint-pi-wsl` | Assistant in `workspace/` of the Windows checkout |
 | `pixi r install` | Installation check and usage summary |
 | `pixi r start-server` / `stop-server` / `restart-server` | Local inference outside the sandbox, GPU with automatic CPU fallback |
-| `pixi r update-project` | Trusted maintenance: `git pull --ff-only` then `pixi install --locked -e agents` |
+| `pixi r update-project` | Trusted maintenance: `git pull --ff-only` then `pixi install --locked -e default` |
 | `pixi r test` | Python test suite |
 
 The launcher tasks are thin wrappers: they `exec` the root-owned launcher in
@@ -151,7 +154,7 @@ WeasyPrint, PDF text back into Markdown). Report authorship and PDF conversion
 are separate skills on purpose; a test keeps them from merging back.
 
 The environment on the sandbox `PATH` is
-`/opt/osint-ai/project/.pixi/envs/agents/bin`, mounted read-only. A functional
+`/opt/osint-ai/project/.pixi/envs/default/bin`, mounted read-only. A functional
 agent can use tools but cannot install them, which is the point: dependency
 changes are maintainer work in a project root checkout. A skill's shell scripts
 may only run programs that a base Linux system has, or programs that
@@ -161,14 +164,15 @@ would be missing at runtime fails the test suite instead of the skill.
 ```bash
 pixi add <conda-package>          # or: pixi add --pypi <package>
 pixi lock
-pixi install -e agents
+pixi install -e default
 pixi r test
 ```
 
 Commit `pixi.toml` and `pixi.lock` together, then have each WSL installation run
-`update-project`. Users review and publish with a Windows Git GUI; the chatbot
-does not control Git metadata at all, only reads the launcher-written summary at
-`/run/git-status` so it can remind the user.
+`update-project`. Users review and publish with a Windows Git GUI. The chatbot
+does run Git, in the user's own checkout and only to read status; its guidance
+forbids committing, pushing, branch switching and discarding work, and the user
+reviews every diff. It has no access to the Linux checkout's repository.
 
 ## Providers and local inference
 
@@ -196,6 +200,15 @@ switching local models. Starting the server downloads no weights; selecting a
 model triggers loading and any required download. Review presets against
 supported hardware: appearing in the list does not imply a model fits the user's
 GPU, RAM or patience. `stop-server` stops inference but retains cached models.
+
+`pi-subagents` lets the assistant hand a narrow job to a child session, and
+`pi-intercom` gives the sessions one channel to talk over. Both run inside the
+same bubblewrap namespace: a child has the same model, the same read-only
+project root and the same writable workspace as its parent. The intercom broker
+state is a per-launch tmpfs, so a second terminal window gets its own channel
+and no message survives a restart. The sub-agent supervisor channel is a
+separate mechanism under the sandbox's own temporary directory and needs no
+broker.
 
 WSL uses the Windows NVIDIA driver. Do not install a Linux NVIDIA kernel driver.
 The agent itself needs no GPU device access.

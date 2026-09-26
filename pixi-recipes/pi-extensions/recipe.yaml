@@ -15,13 +15,14 @@ build:
       PLUGINS: >-
         pi-llama-cpp@0.13.0
         pi-web-access@0.29.0
+        pi-intercom@0.14.0
         pi-subagents@0.71.0
         pi-token-speed@0.10.1
         @juicesharp/rpiv-ask-user-question@2.10.1
 
 requirements:
   build:
-    - pi-coding-agent =0.86.1
+    - pi-coding-agent
     - patchelf
   run:
-    - pi-coding-agent =0.86.1
+    - pi-coding-agent

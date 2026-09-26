@@ -66,12 +66,32 @@ def main():
             "---\nname: smoke-test\ndescription: Packaging smoke test skill for CI only.\n---\n"
             "Test only.\n"
         )
+        # The agent's checkout is a real repository it can run Git in, so the
+        # copy needs one. The test's own changes are committed, not published.
+        if shutil.which("git"):
+            for arguments in (
+                ["init", "-q", "-b", "main"],
+                ["add", "-A"],
+                ["-c", "user.name=smoke", "-c", "user.email=smoke@example.com",
+                 "commit", "-qm", "smoke fixture"],
+            ):
+                subprocess.run(
+                    ["git", "-C", str(project), *arguments], check=True, capture_output=True
+                )
         state = root / "state"
         (state / "agent-home").mkdir(parents=True)
 
-        print("Installing the locked 'agents' environment into the copy (this downloads)...")
+        print(f"Installing the locked '{sandbox.ENV_NAME}' environment into the copy (this downloads)...")
         subprocess.run(
-            [pixi, "install", "--locked", "-e", "agents", "--manifest-path", str(project / "pixi.toml")],
+            [
+                pixi,
+                "install",
+                "--locked",
+                "-e",
+                sandbox.ENV_NAME,
+                "--manifest-path",
+                str(project / "pixi.toml"),
+            ],
             check=True,
         )
 
@@ -83,6 +103,20 @@ def main():
         if result.returncode:
             raise SystemExit(f"Sandbox Pi startup failed ({result.returncode}). Log: {logpath}")
         assert (state / "agent-home/.pi/agent/settings.json").is_file(), "Pi home was not prepared"
+
+        # The agent's own Git must work from inside the sandbox; the launcher
+        # no longer produces a status summary for it.
+        with logpath.open("a") as log:
+            status = subprocess.run(
+                sandbox.build_command(
+                    project, workspace, state, mode="native", command=["git", "status", "-sb"]
+                ),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+        if status.returncode:
+            raise SystemExit(f"git status failed in the sandbox ({status.returncode}). Log: {logpath}")
 
         # RPC is used only by this test: it exercises real extension loading and
         # explicit .agents/skills discovery without calling a model.
@@ -112,8 +146,8 @@ def main():
                     process.kill()
                     process.wait()
         print(
-            "Real environment, Pi startup inside bubblewrap, /models registration and "
-            f".agents/skills discovery: OK. Log: {logpath}"
+            "Real environment, Pi startup inside bubblewrap, /models registration, "
+            f".agents/skills discovery and a working git status: OK. Log: {logpath}"
         )
 
 

@@ -107,7 +107,7 @@ install -m 755 "$TEMP/pixi" /usr/local/bin/pixi
 # Agent tools and Pi itself live in the Linux checkout's own environment. The
 # launcher later exposes that environment read-only inside the sandbox.
 runuser -u osint -- env -i HOME=/home/osint PATH=/usr/local/bin:/usr/bin:/bin \
-    pixi install --locked -e agents --manifest-path "$LINUX_PROJECT/pixi.toml"
+    pixi install --locked -e default --manifest-path "$LINUX_PROJECT/pixi.toml"
 
 # Protected installed inference artifact, not a third checkout. Never run the
 # user-editable project's activation hooks outside bubblewrap on startup.

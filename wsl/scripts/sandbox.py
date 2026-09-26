@@ -10,19 +10,23 @@ Two deployment modes share this file.
 ``wsl``
     Windows deployment. The same repository is checked out twice:
 
-    * a Linux checkout (default ``/home/osint/osint-ai``) owns Git, the
-      manifest and Pixi environments, and is what executes;
+    * a Linux checkout (default ``/home/osint/osint-ai``) owns the manifest and
+      the Pixi environments, and is what executes;
     * a Windows checkout (mounted by the boot helper at ``/mnt/osint-ai``)
-      supplies only its ``workspace/`` directory to the agent.
+      holds the files the user edits and commits.
 
-    So Pi runs with its working directory inside the Windows deployment, while
-    the code that launched it stays in Linux storage. The agent can neither see
-    nor modify the project root: it is a *different* Git checkout, and edits to
-    its root files have no effect here.
+    The agent works in the Windows checkout, which is bound read-write with its
+    ``.git``, while the Linux checkout stays read-only at
+    ``/opt/osint-ai/project`` so the program that starts Pi cannot be changed
+    from inside a session. In plain Linux there is only one checkout, so the
+    project root is the writable one.
 
-The namespace is built before Pi starts. Nothing the sandboxed agent can write
-is ever executed outside it; the read-only ``.pixi`` environment supplies the
-Pi binary and the command-line tools available to skills.
+Nothing the sandboxed agent can write is executed outside the sandbox; the
+read-only ``.pixi`` environment supplies the Pi binary and the command-line
+tools available to skills. The agent can read its checkout's whole Git history
+and, because ``.git`` is writable, could commit, switch branches or discard
+work. ``AGENTS.md`` and ``docs/security.md`` state that, and the user reviews
+every diff in the Windows GUI.
 """
 
 import argparse
@@ -38,8 +42,17 @@ WORKSPACE_MOUNT = Path("/workspace")
 WINDOWS_MOUNT = Path("/mnt/osint-ai")
 DEFAULT_PROJECT_ROOT = Path("/home/osint/osint-ai")
 DEFAULT_STATE = Path("/var/lib/osint-ai")
-ENV_NAME = "agents"
+ENV_NAME = "default"
 LINUX_FILESYSTEMS = {"ext4", "xfs", "btrfs"}
+# pi-intercom keeps its broker socket, PID file, spawn lock and queued mail in
+# ~/.pi/agent/intercom. The agent home is persistent and writable, so without a
+# private mount that runtime state would outlive the session: a second terminal
+# window would unlink the live broker's socket on startup, and mail queued for a
+# closed session could be redelivered to a later one. A fresh tmpfs per sandbox
+# gives every launch its own broker, keeps the socket out of the persistent home,
+# and still lets a parent session talk to its sub-agent children, which share
+# this namespace. Nothing outside the sandbox can reach the socket.
+INTERCOM_DIR = "/home/osint/.pi/agent/intercom"
 
 
 def require_directory(path, hint=""):
@@ -95,66 +108,16 @@ def check_storage(mode, project, workspace, state):
             )
         if workspace != WINDOWS_MOUNT / "workspace":
             raise RuntimeError(f"In WSL mode the workspace must be {WINDOWS_MOUNT}/workspace.")
+        # The agent works in this checkout and runs its own Git, so the
+        # repository has to be really there.
+        checkout_git = WINDOWS_MOUNT / ".git"
+        if checkout_git.is_symlink() or not checkout_git.is_dir():
+            raise RuntimeError(
+                f"{WINDOWS_MOUNT} is not a Git checkout ({checkout_git} is missing). "
+                "Re-run the Windows installer."
+            )
     if os.path.realpath(workspace) == os.path.realpath(project):
         raise RuntimeError("The workspace must be a subdirectory, not the project root.")
-
-
-def git_status_snapshot(project, destination):
-    """Write a read-only Git summary the agent can use to remind the user.
-
-    Git belongs to the human's Windows GUI, so the sandbox never sees a Git
-    directory or credentials. This trusted launcher-side inspection reads only
-    the repository's own status: hooks, fsmonitors, system and global Git
-    configuration are disabled, and no lock file is written.
-    """
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    git = Path("/usr/bin/git")
-    if not git.is_file():
-        git = Path("/bin/git")
-    lines = []
-    try:
-        if git.is_file() and (project / ".git").is_dir():
-            result = subprocess.run(
-                [
-                    str(git),
-                    "--no-optional-locks",
-                    "-c",
-                    f"safe.directory={project}",
-                    "-c",
-                    "core.fsmonitor=false",
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    "-c",
-                    "core.autocrlf=false",
-                    "-C",
-                    str(project),
-                    "status",
-                    "--porcelain=v1",
-                    "-b",
-                    "--untracked-files=normal",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
-                env={"GIT_CONFIG_NOSYSTEM": "1", "HOME": "/nonexistent", "PATH": "/usr/bin:/bin"},
-            )
-            if result.returncode == 0:
-                lines = result.stdout.splitlines()
-            else:
-                lines = ['git status failed: ' + (result.stderr or "").strip()[:200]]
-        else:
-            lines = ["No Git repository is available on this installation."]
-    except (OSError, subprocess.SubprocessError) as error:
-        lines = [f"git status unavailable: {error}"]
-    header = (
-        f"Git status of the user's checkout ({project}). Read-only information for "
-        "reminding the user; never run Git yourself."
-    )
-    temporary = destination.with_suffix(".tmp")
-    temporary.write_text("\n".join([header, *lines]) + "\n")
-    temporary.chmod(0o600)
-    temporary.replace(destination)
 
 
 def build_command(
@@ -165,7 +128,6 @@ def build_command(
     mode="native",
     bwrap="/usr/bin/bwrap",
     pi_args=(),
-    git_status=None,
     command=None,
 ):
     """Pure argv construction apart from validating protected mount points.
@@ -220,9 +182,23 @@ def build_command(
     ):
         if Path(path).exists():
             args += ["--ro-bind", path, path]
-    # The project root is the code that starts Pi. It stays read-only, so a
-    # sandboxed agent can never change what runs next or escape into Git.
-    args += ["--ro-bind", str(project), str(PROJECT_MOUNT)]
+    # The checkout the agent works in is bound read-write, including its `.git`,
+    # so the assistant can run `git status` itself and the user reviews real
+    # changes. In WSL that is the Windows checkout, at the same path the boot
+    # helper mounted it; the Linux checkout that starts Pi stays read-only
+    # there. In plain Linux there is only one checkout, so the project root is
+    # both the program and the work, and it is writable.
+    if mode == "wsl":
+        args += ["--ro-bind", str(project), str(PROJECT_MOUNT)]
+        args += ["--bind", str(WINDOWS_MOUNT), str(WINDOWS_MOUNT)]
+    else:
+        args += ["--bind", str(project), str(PROJECT_MOUNT)]
+        # The project root is writable here, and it holds the Pixi environment
+        # the assistant runs on. Re-bind `.pixi` read-only on top of it, so the
+        # tools it uses still cannot be installed or replaced from inside.
+        environment_dir = project / ".pixi"
+        if environment_dir.is_dir():
+            args += ["--ro-bind", str(environment_dir), str(PROJECT_MOUNT / ".pixi")]
     args += [
         "--bind",
         str(workspace),
@@ -230,14 +206,22 @@ def build_command(
         "--bind",
         str(home),
         "/home/osint",
+        # Mounted after the home, so it shadows only the intercom subdirectory.
+        "--tmpfs",
+        INTERCOM_DIR,
     ]
-    if git_status is not None and Path(git_status).is_file():
-        # Launcher-produced read-only summary used only for user reminders.
-        args += ["--ro-bind", str(git_status), "/run/git-status"]
-    git = project / ".git"
-    if git.exists() or git.is_symlink():
-        require_directory(git)  # Linked worktrees are deliberately unsupported.
-        args += ["--tmpfs", str(PROJECT_MOUNT / ".git"), "--remount-ro", str(PROJECT_MOUNT / ".git")]
+    if mode == "wsl":
+        # The Linux checkout's own history stays out of reach: the agent works
+        # in the Windows checkout, so that repository is not its business.
+        git = project / ".git"
+        if git.exists() or git.is_symlink():
+            require_directory(git)  # Linked worktrees are deliberately unsupported.
+            args += [
+                "--tmpfs",
+                str(PROJECT_MOUNT / ".git"),
+                "--remount-ro",
+                str(PROJECT_MOUNT / ".git"),
+            ]
     # Installed copies are authoritative when present; a plain Linux checkout
     # only has its own (developer-editable) copy.
     installed = Path("/usr/local/lib/osint-ai/pi-entry.sh")
@@ -298,9 +282,6 @@ def parse_args(argv):
     return {
         "mode": mode,
         "project": project,
-        # In WSL the user edits and commits the Windows checkout, so reminders
-        # describe that checkout rather than the Linux one that executes.
-        "status_repo": WINDOWS_MOUNT if mode == "wsl" else project,
         "workspace": known.workspace or default_workspace(mode, project),
         "state": known.state or default_state(mode),
         "pi_args": pi_args,
@@ -317,19 +298,12 @@ def main(argv=None):
         # by the launcher.
         (options["state"] / "agent-home").mkdir(parents=True, exist_ok=True)
     check_storage(options["mode"], options["project"], options["workspace"], options["state"])
-    status = options["state"] / "git-status"
-    try:
-        git_status_snapshot(options["status_repo"], status)
-    except OSError as error:  # Reminders are optional; starting Pi is not.
-        print(f"OSINT AI: Git status unavailable ({error}).", file=sys.stderr)
-        status = None
     argv = build_command(
         options["project"],
         options["workspace"],
         options["state"],
         mode=options["mode"],
         pi_args=options["pi_args"],
-        git_status=status,
     )
     os.execv(argv[0], argv)
 

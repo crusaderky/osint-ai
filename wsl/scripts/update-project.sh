@@ -12,6 +12,6 @@ root=${root:-$PWD}
 [[ -d $root/.git ]] || { echo "No Linux checkout at $root. Run the Windows installer first." >&2; exit 1; }
 git -C "$root" pull --ff-only
 env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
-    pixi install --locked -e agents --manifest-path "$root/pixi.toml"
+    pixi install --locked -e default --manifest-path "$root/pixi.toml"
 printf '\nLinux deployment updated. Close and reopen the chatbot to use the new tools.\n'
 printf 'Inference changes (pixi-recipes, models.ini) still need a maintainer to reinstall /opt/osint-ai/server.\n'

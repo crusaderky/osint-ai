@@ -1,5 +1,4 @@
 [workspace]
-authors = ["crusaderky <crusaderky@gmail.com>"]
 channels = ["https://prefix.dev/conda-forge"]
 name = "osint-ai"
 platforms = [{ name = "linux-64-glibc234", platform = "linux-64", glibc = "2.34" }]
