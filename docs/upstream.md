@@ -32,18 +32,20 @@ Adapted from the adjacent `pixi-llm-recipes` checkout supplied for this task:
   local llama server defaults. Skills are discovered at
   `/workspace/.agents/skills`. Removed the `use-gh-cli` skill because Git belongs
   to Windows.
-- `bwrap-pi.sh` / `sandbox.py`: replaced the blanket root bind with an explicit
-  allowlist, added Linux-filesystem validation, removed skill rsync-back, and
-  moved containment before Pi starts. Supports the two deployment modes: the
-  workspace of the current checkout, or the workspace of the Windows checkout
-  mounted at `/mnt/osint-ai`. Not copied from upstream: the agent's own checkout
+- `scripts/bwrap-pi.sh` and `scripts/sandbox.py`: replaced the blanket root bind
+  with an explicit allowlist, added Linux-filesystem validation, removed skill
+  rsync-back, and moved containment before Pi starts. Upstream had a launcher per
+  deployment; here one script takes `--native` or `--wsl`, for the workspace of
+  the current checkout or of the Windows checkout mounted at `/mnt/osint-ai`.
+  Not copied from upstream: the agent's own checkout
   is bound read-write with its `.git` (upstream masks `.git` and hands over a
   launcher-written summary instead), and the launcher-written summary and the
   per-launch intercom tmpfs that upstream needed to keep `$CONDA_PREFIX` clean
   are both unnecessary here, where the environment is read-only and the agent
   home is already a separate persistent directory.
-- `pixi r install`: simplified to installation checks and usage guidance;
-  first-time privileged setup lives in the Windows bootstrap/WSL provisioning.
+- `pixi r install` (`scripts/install-check.sh`): simplified to installation
+  checks and usage guidance; first-time privileged setup lives in the Windows
+  bootstrap and WSL provisioning. There is no Linux installer script.
 
 ## Third-party licences
 

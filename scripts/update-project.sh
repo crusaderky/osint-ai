@@ -9,7 +9,7 @@ if [[ -z $root && -r /etc/osint-ai.json ]]; then
     root=$(/usr/bin/python3 -I -c 'import json;print(json.load(open("/etc/osint-ai.json"))["linux_project"])')
 fi
 root=${root:-$PWD}
-[[ -d $root/.git ]] || { echo "No Linux checkout at $root. Run the Windows installer first." >&2; exit 1; }
+[[ -d $root/.git ]] || { echo "No Git checkout at $root. Run this from the project root (plain Linux) or inside the WSL terminal created by the Windows installer." >&2; exit 1; }
 git -C "$root" pull --ff-only
 env -i HOME="$HOME" PATH=/usr/local/bin:/usr/bin:/bin \
     pixi install --locked -e default --manifest-path "$root/pixi.toml"

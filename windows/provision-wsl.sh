@@ -1,6 +1,7 @@
 #!/bin/bash
-# Trusted, first-install provisioning only. The Windows bootstrap executes this
-# from the freshly cloned Windows checkout, before the agent has ever run.
+# Trusted, first-install provisioning only. windows/Install.ps1 executes this as
+# root from the freshly cloned Windows checkout
+# (/mnt/osint-ai/windows/provision-wsl.sh), before the agent has ever run.
 #
 # It creates the second (Linux) checkout that owns Git, Pixi and the runtime.
 set -euo pipefail
@@ -13,7 +14,10 @@ WINDOWS_CHECKOUT=$1
 REPOSITORY=$2
 REF=$3
 LINUX_PROJECT=$4
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)   # windows/
+REPO=$(cd "$HERE/.." && pwd)                         # the checkout being installed
+[[ -f $REPO/pixi.toml && -f $REPO/scripts/sandbox.py ]] || {
+    echo 'Unexpected checkout layout: need scripts/sandbox.py next to windows/.' >&2; exit 1; }
 [[ $LINUX_PROJECT =~ ^/[A-Za-z0-9._/-]+$ && $LINUX_PROJECT != */ ]] || { echo 'Bad Linux project path.' >&2; exit 1; }
 [[ -d $WINDOWS_CHECKOUT ]] || { echo 'Windows checkout is not mounted.' >&2; exit 1; }
 
@@ -27,12 +31,16 @@ fi
 [[ $(id -u osint) == 1000 ]] || { echo 'Unexpected osint UID.' >&2; exit 1; }
 
 install -d -m 755 /usr/local/lib/osint-ai /var/lib/osint-ai /opt/osint-ai
-for file in sandbox.py bwrap-pi.sh pi-entry.sh mount-workspace.py server.py install.sh \
-    launch-pi.sh launch-server.sh update-project.sh; do
-    install -m 755 "$HERE/$file" "/usr/local/lib/osint-ai/$file"
+# The launcher, entry script and server controller are the same files the Linux
+# deployment runs from scripts/. mount-workspace.py is the one part here that
+# only makes sense in WSL.
+for file in bwrap-pi.sh install-check.sh launch-server.sh pi-entry.sh sandbox.py server.py \
+    update-project.sh; do
+    install -m 755 "$REPO/scripts/$file" "/usr/local/lib/osint-ai/$file"
 done
+install -m 755 "$HERE/mount-workspace.py" /usr/local/lib/osint-ai/mount-workspace.py
 for command in osint-pi osint-pi-wsl osint-terminal start-server stop-server restart-server update-project; do
-    install -m 755 "$HERE/install/$command" "/usr/local/bin/$command"
+    install -m 755 "$HERE/launchers/$command" "/usr/local/bin/$command"
 done
 for dir in agent-home server-state models; do
     install -d -m 700 -o osint -g osint "/var/lib/osint-ai/$dir"
@@ -132,6 +140,6 @@ fi
 
 # Final acceptance check: the real launcher must reach Pi inside containment.
 runuser -u osint -- /usr/local/bin/osint-pi-wsl --version
-runuser -u osint -- /usr/local/lib/osint-ai/install.sh
+runuser -u osint -- /usr/local/lib/osint-ai/install-check.sh
 touch /etc/osint-ai-installed
 printf '\nOSINT AI installed. Use the OSINT AI Terminal desktop icon to start.\n'

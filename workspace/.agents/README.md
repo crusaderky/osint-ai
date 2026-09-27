@@ -1,11 +1,11 @@
 # Runtime workspace
 
-This folder is what the agent has access to at runtime (in addition to the internet)/
+This folder is what the agent can see at runtime, apart from the internet.
 
-- `AGENTS.md`: this teaches the agent its overall behaviour. It is visible to it at all
-  times. This files is for the agent to read; not for humans.
-- `.agents/skills/*/SKILL.md`: each of these files is a script that teaches a specific
-  action to the agent. The agent only reads it when it needs to.
+- `AGENTS.md`: the agent's overall behaviour. It is in front of the agent at all
+  times. This file is for the agent to read, not for humans.
+- `.agents/skills/*/SKILL.md`: each one teaches a specific action. The agent only
+  reads a skill when it needs it.
 - Any files that you want your agent to see (copy-pasted from elsewhere on your disk)
 - Any files that your agent creates
 
@@ -28,5 +28,5 @@ This folder is what the agent has access to at runtime (in addition to the inter
   2024. Update the relevant skill to avoid the same mistake in the future."_
 - _"Do not, EVER, say the word 'load-bearing' again. Note it down in @AGENTS.md."_
 
-You shouldn't typically need to write these files by hand. Asking the agent to modify
-them itself is easier.
+You should rarely need to write these files yourself. Asking the agent to change
+them is easier, and it keeps the wording in a form the agent follows.

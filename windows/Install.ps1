@@ -244,7 +244,7 @@ else
     echo 'Project folder is not empty and is not the expected Git checkout. Choose an empty folder.' >&2
     exit 1
 fi
-exec /bin/bash /mnt/osint-ai/wsl/scripts/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOSITORY" "$REF" "$LINUX_PROJECT"
+exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOSITORY" "$REF" "$LINUX_PROJECT"
 '@
     # Prefix escaped assignments once; never run chained replacements over user input.
     $assignments = "WINDOWS_PROJECT=$pathLiteral`nREPOSITORY=$repoLiteral`nREF=$refLiteral`nLINUX_PROJECT=$linuxLiteral`n"

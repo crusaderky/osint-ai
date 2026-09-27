@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 $tokens = $null
 $errors = $null
-$file = Join-Path $PSScriptRoot '../wsl/Install.ps1'
+$file = Join-Path $PSScriptRoot '../windows/Install.ps1'
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw ($errors | Out-String) }
 $function = $ast.Find({param($node)

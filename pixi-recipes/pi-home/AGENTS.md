@@ -8,7 +8,8 @@ user's checkout, unreviewed and uncommittable.
 
 Read `/workspace/AGENTS.md` for the working rules, including running
 `git status` yourself in the checkout you work in to remind the user to commit
-and push with their Windows Git GUI. Never commit, push, switch branches or
+and push with their own Git app (GitHub Desktop on Windows). Never commit, push,
+switch branches or
 discard work yourself; the user reviews every change. The program itself is a
 different checkout, mounted read-only at `/opt/osint-ai/project`; you cannot
 change it from here.

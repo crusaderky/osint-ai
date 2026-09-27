@@ -6,17 +6,18 @@ preview = ["pixi-build"]
 version = "0.1.0"
 
 # The functional assistant works in `workspace/`; these tasks start it and
-# maintain the code deployment. `osint-pi` uses the `workspace/` of this
-# checkout; `osint-pi-wsl` uses the `workspace/` of the Windows checkout that
-# the WSL boot helper mounts at /mnt/osint-ai. Both enter bubblewrap first.
+# maintain the code deployment. Both assistant tasks run the same sandbox
+# launcher with a different first argument: `--native` uses the `workspace/` of
+# this checkout, `--wsl` the `workspace/` of the Windows checkout that the boot
+# helper mounts at /mnt/osint-ai. Pi only ever starts inside bubblewrap.
 [tasks]
-install = "bash wsl/scripts/install.sh"
-osint-pi = "bash wsl/scripts/launch-pi.sh native"
-osint-pi-wsl = "bash wsl/scripts/launch-pi.sh wsl"
-start-server = "bash wsl/scripts/launch-server.sh start"
-stop-server = "bash wsl/scripts/launch-server.sh stop"
-restart-server = "bash wsl/scripts/launch-server.sh restart"
-update-project = "bash wsl/scripts/update-project.sh"
+install = "bash scripts/install-check.sh"
+osint-pi = "bash scripts/bwrap-pi.sh --native"
+osint-pi-wsl = "bash scripts/bwrap-pi.sh --wsl"
+start-server = "bash scripts/launch-server.sh start"
+stop-server = "bash scripts/launch-server.sh stop"
+restart-server = "bash scripts/launch-server.sh restart"
+update-project = "bash scripts/update-project.sh"
 test = "python -m unittest discover -s tests -v"
 
 # Tools live here and are installed by a maintainer in the project root. The

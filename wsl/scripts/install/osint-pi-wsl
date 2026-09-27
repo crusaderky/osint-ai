@@ -1,4 +1,0 @@
-#!/bin/bash -p
-# WSL mode: the functional workspace is /mnt/osint-ai/workspace (Windows drive).
-set -euo pipefail
-exec /usr/local/lib/osint-ai/bwrap-pi.sh --wsl "$@"

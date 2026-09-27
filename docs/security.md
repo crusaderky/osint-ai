@@ -15,8 +15,9 @@ is guidance only.
    (item 5) means a compromised or misled agent can alter this repository's
    history; the release pipeline must therefore pin by tag and verify the
    signature of what it downloads, not trust the working tree.
-2. WSL root provisions the boot mount helper, launchers and inference snapshot
-   once. The root helper reads only `/etc/osint-ai.json`; no project shell code
+2. WSL root provisions the boot mount helper (`windows/mount-workspace.py`),
+   launchers and inference snapshot once. The root helper reads only
+   `/etc/osint-ai.json`; no project shell code
    or config is sourced at boot. It mounts the Windows drive under a root-only
    directory, binds the selected checkout to `/mnt/osint-ai`, then removes the
    whole-drive mount. Directory file descriptors pin bind-mount sources and
@@ -25,11 +26,12 @@ is guidance only.
 3. The Linux checkout (`/home/osint/osint-ai`) owns Git, the manifest and every
    Linux environment. The sandboxed agent gets it **read-only**, so nothing the
    agent writes can change what runs next. `pixi r osint-pi-wsl` is a thin
-   wrapper: the outer Pixi reads only that unmodifiable manifest, then execs the
-   root-owned launcher, which enters bubblewrap before Pi starts. The
+   wrapper around `scripts/bwrap-pi.sh --wsl`: the outer Pixi reads only that
+   unmodifiable manifest, then execs the root-owned launcher, which enters
+   bubblewrap before Pi starts. The
    `default` environment is also mounted read-only inside the sandbox, so a
    functional agent can use tools but cannot install or replace them.
-4. `sandbox.py` builds an allowlisted root filesystem with a cleared
+4. `scripts/sandbox.py` builds an allowlisted root filesystem with a cleared
    environment: `/usr` etc. read-only, the persistent agent home at
    `/home/osint`, the functional workspace read-write at `/workspace`, and the
    checkout the agent works in read-write **with its `.git`** — the Windows

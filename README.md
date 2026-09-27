@@ -1,43 +1,48 @@
 # OSINT AI
 
-A private, AI-assisted filing cabinet for compliance research. You ask it about a
-company or a person; it reads public sources — registries, sanctions lists,
-company websites, news, filings — and writes down what it **verified**, what is
+A private, AI-assisted filing cabinet for compliance research. You ask it about
+a company or a person. It reads public sources (registries, sanctions lists,
+company websites, news, filings) and writes down what it **verified**, what is
 only **reported**, what it **inferred** and what it **could not check**. Every
 fact carries a link and the date you looked.
 
-You keep nothing in a black box: the research instructions it follows are plain
-text files that you can read, change and share. Those files are called
-**skills**, and building them up is the real value of this project.
+Nothing is hidden from you. The instructions the assistant follows are plain
+text files you can read, change and share. They are called **skills**, and
+building them up is the point of the project.
 
 ---
 
 ## Contents
 
-1. [Install once](#install-once)
-2. [Start chatting](#start-chatting)
-3. [Save your work with Git (5 minutes, once)](#save-your-work-with-git-5-minutes-once)
-4. [Talking to the assistant (the commands you need)](#talking-to-the-assistant-the-commands-you-need)
-5. [AGENTS.md: the rulebook](#agentsmd-the-rulebook)
-6. [Skills: your repeatable checks](#skills-your-repeatable-checks)
-7. [After any change: commit and push](#after-any-change-commit-and-push)
-8. [Spreadsheets and PDF reports](#spreadsheets-and-pdf-reports)
-9. [If something goes wrong](#if-something-goes-wrong)
-10. [Uninstall everything](#uninstall-everything)
+1. [Install once (Windows)](#install-once)
+2. [Install on Linux](#install-on-linux)
+3. [Start chatting](#start-chatting)
+4. [Save your work with Git](#save-your-work-with-git)
+5. [Talking to the assistant](#talking-to-the-assistant)
+6. [AGENTS.md](#agentsmd)
+7. [Skills: your repeatable checks](#skills-your-repeatable-checks)
+8. [After any change: commit and push](#after-any-change-commit-and-push)
+9. [Spreadsheets and PDF reports](#spreadsheets-and-pdf-reports)
+10. [If something goes wrong](#if-something-goes-wrong)
+11. [Uninstall everything](#uninstall-everything)
 
 ---
 
 ## Install once
+
+This section is for Windows 11. On Linux, use
+[Install on Linux](#install-on-linux) instead; everything after
+[Start chatting](#start-chatting) is the same on both.
 
 You need a Windows 11 PC (Intel or AMD), internet access and about 5 GB of free
 disk space. An NVIDIA graphics card is optional; without one the assistant runs
 more slowly on the processor.
 
 1. Download and unzip the installation package.
-2. Double-click **`wsl\Install.cmd`** and follow the prompts. If Windows asks for
-   permission to make changes, allow it.
-3. If Windows asks you to restart, do it, then double-click **`wsl\Install.cmd`**
-   again. Setup continues where it stopped.
+2. Double-click **`windows\Install.cmd`** and follow the prompts. If Windows asks
+   for permission to make changes, allow it.
+3. If Windows asks you to restart, do it, then double-click
+   **`windows\Install.cmd`** again. Setup continues where it stopped.
 
 When it finishes you get three desktop icons:
 
@@ -51,10 +56,36 @@ Setup takes a while the first time: it downloads a Linux system, the assistant,
 and a terminal program called MobaXterm (separate freeware; its own licence
 applies).
 
+## Install on Linux
+
+There is no installer script for Linux. If you are comfortable in a terminal you
+do not need one; from an empty folder:
+
+```bash
+curl -fsSL https://pixi.sh/install.sh | sh      # or use your package manager
+git clone https://github.com/crusaderky/osint-ai.git
+cd osint-ai && pixi install --locked -e default
+pixi r osint-pi
+```
+
+That is all. `pixi r osint-pi` starts the assistant inside bubblewrap, working
+in `workspace/`, with the same rules, skills and commands as on Windows. Your
+sign-in, chat history and settings are kept in `~/.local/state/osint-ai`.
+
+Two requirements: the `bubblewrap` package, and unprivileged user namespaces.
+If the sandbox refuses to start, [docs/development.md](docs/development.md)
+has the AppArmor profile Ubuntu 24.04 asks for.
+
+`pixi r install` re-runs those checks and names whatever is missing; it installs
+nothing. Local inference is not set up on Linux. Either use a hosted model with
+`/login`, or build the llama.cpp runtime yourself, which
+[docs/development.md](docs/development.md) explains.
+
 ## Start chatting
 
 1. Double-click **OSINT AI Terminal**. A Linux-style window opens and the
-   assistant starts on its own. Wait for the prompt.
+   assistant starts on its own. Wait for the prompt. On Linux, run
+   `pixi r osint-pi` in the project folder instead.
 2. Type **`/login`**, press Enter, choose **OpenRouter** (see
    [the account section](#before-the-first-chat-openrouter)), paste your key, and
    the assistant remembers it from now on.
@@ -115,15 +146,17 @@ installation to link it to your GitHub account first.
 | **Pull** | **Fetch origin** / **Pull origin** | Before you start work, to get your team's changes |
 | **History** | **History** | To see earlier versions; right-click a change → **Revert changes** to put one back |
 
-Commit, then Push. That order is enough to remember. Everything you do in this
-project ends with those two buttons.
+Commit, then Push. Everything you finish here ends with those two buttons.
+
+On Linux, the same four moves are `git add`, `git commit`, `git push` and
+`git pull` typed in the project folder.
 
 The assistant can see this folder and run `git status` on it, so it can tell you
-what is not saved yet. It is told never to commit, push or throw work away —
-that stays your job, in GitHub Desktop. If it ever offers to press those buttons
-for you, say no and check what it changed.
+what is not saved yet. It is told never to commit, push or throw work away; that
+stays your job in GitHub Desktop. If it ever offers to press those buttons for
+you, say no and look at what it changed.
 
-## Talking to the assistant (the commands you need)
+## Talking to the assistant
 
 Type a slash, then a word, then Enter.
 
@@ -131,7 +164,7 @@ Type a slash, then a word, then Enter.
 | --- | --- |
 | `/login` | Connect an AI service (OpenRouter and others) and store the key |
 | `/model` | Choose which AI model answers you. Press **Ctrl+S** in the list to make one your usual choice |
-| `/scoped-models` | Choose which models you switch between with **Ctrl+P** — tick a handful, leave the rest off |
+| `/scoped-models` | Choose which models you switch between with **Ctrl+P**: tick a handful, leave the rest off |
 | `/thinking` | How much "thinking time" the model gets: low is fast and cheap, high is slower and better for difficult work. Some guides call this reasoning effort |
 | `/new` | Clean slate. Use it when you start a different subject |
 | `/resume` | Open an earlier conversation and continue it |
@@ -148,33 +181,30 @@ Good habits:
 
 ### When the assistant calls in help
 
-For a long, wide job — a company with twenty sources to sweep, a report with
-many sections — the assistant can start **sub-agents**: small copies of itself
-that each do one narrow job and hand the result back. They are the same model,
-in the same sandbox, with the same rules and the same sources; the assistant
-still writes the answer, and it still needs every fact to carry a link and a
-date.
+For a long, wide job (a company with twenty sources to sweep, a report with many
+sections) the assistant can start **sub-agents**: small copies of itself that
+each do one narrow job and hand the result back. Each one is the same model, in
+the same sandbox, under the same rules. The assistant still writes the answer,
+and every fact still needs a link and a date.
 
-Two things to expect: it takes longer and it uses more of the model at once, so
-on a local model a sub-agent job can be slow. Say plainly what you want, for
-example *"Check the four registries in parallel and tell me what you could not
-verify"*, and keep one subject per request. If you would rather it answer
-directly, say so — that is a normal request.
+Expect it to take longer and to use more of the model at once, so on a local
+model a sub-agent job can be slow. Say plainly what you want, for example *"Check
+the four registries in parallel and tell me what you could not verify"*, and keep
+one subject per request. If you would rather it answered directly, say so. That
+is a normal request.
 
-If a sub-agent gets stuck and needs a decision, it can ask the chat it was
-started from, and the question appears in that window. One window at a time is
-connected: if you open a second **OSINT AI Terminal**, each gets its own private
-channel and neither can reach the other, and nothing is left behind for the next
-session.
+If a sub-agent gets stuck, it asks the window it came from. The windows are not
+connected to each other: open a second **OSINT AI Terminal** and each gets its
+own channel. Nothing survives a restart.
 
-## AGENTS.md: the rulebook
+## AGENTS.md
 
 **`AGENTS.md`** is a plain text file the assistant reads every time it starts. It
-tells the assistant what "good" looks like: which sources you trust, how to
-label an unconfirmed report, where to save a report, what never to do.
+says what a good answer looks like: which sources you trust, how to label an
+unconfirmed report, where reports go, what never to do.
 
-Yours is `workspace\AGENTS.md` (Windows) and it is safe to edit: the assistant
-only follows what is written there.
+Yours is `workspace\AGENTS.md`, and it is safe to edit: the assistant only
+follows what is written there.
 
 You do not have to type it yourself. Ask:
 
@@ -185,15 +215,15 @@ You do not have to type it yourself. Ask:
 Then read what it wrote, type `/reload`, and
 **Commit + Push** in GitHub Desktop with a note like `rule: cite register and date`.
 
-Keep it short and specific. Ten clear rules work better than a hundred vague
-ones. If the assistant ignores a rule, the rule is usually too vague — ask it to
-rewrite that rule.
+Keep it short and specific. Ten clear rules beat a hundred vague ones. If the
+assistant ignores a rule, the rule is probably too vague: ask it to rewrite that
+rule.
 
 ## Skills: your repeatable checks
 
-A **skill** is one repeatable check, written down so the assistant performs it
-the same way every time — for you, and for everyone on your team after a
-Commit and Push.
+A **skill** is one repeatable check, written down so the assistant does it the
+same way every time. After a Commit and Push it works the same for everyone on
+your team.
 
 Skills live in `workspace\.agents\skills\<name>\SKILL.md`. Three come with the
 installation: `spreadsheet-reader` (reads Excel files), `compliance-report`
@@ -212,7 +242,7 @@ Then:
 1. Open the new `SKILL.md` in Notepad from **OSINT AI Files** and read it.
 2. Type `/reload` in the assistant.
 3. Test it on something you know the answer to.
-4. Ask the assistant to fix what was wrong — it edits the same file.
+4. Ask the assistant to fix what was wrong. It edits the same file.
 5. **Commit + Push.**
 
 A good skill names its inputs, lists the sources in order, says what "verified"
@@ -224,7 +254,7 @@ assistant trusts, so never put passwords or API keys in one.
 `AGENTS.md` and everything under `workspace\.agents` are your team's knowledge.
 They only count once they are saved to GitHub.
 
-**After every change to `AGENTS.md` or a skill — Commit, then Push.**
+**After every change to `AGENTS.md` or a skill: Commit, then Push.**
 
 The assistant will remind you when it notices unsaved or unsynced changes. If
 you close the terminal straight after editing something, the change exists only
@@ -255,9 +285,9 @@ on that PC: someone else may redo work you already finished.
 | Teammates' new skills are missing | GitHub Desktop → **Pull**, then `/reload` |
 | Local model will not load | The model may be too large for your PC; pick a smaller one with `/models` |
 
-Review what the assistant produces before you rely on it. It can be wrong, it
-repeats the mistakes of the pages it reads, and an online AI service receives
-what you send it. Keep confidential files outside the project folder.
+Review what the assistant produces before you rely on it. It gets things wrong,
+it can repeat mistakes made by the pages it read, and an online service receives
+whatever you send it. Keep confidential files outside the project folder.
 
 If you only want to sign out of the AI service but keep the program, type
 **`/logout`** in the assistant instead of uninstalling.
@@ -347,8 +377,12 @@ Subsystem for Linux**, restart).
 * **Windows key + R** → `%LOCALAPPDATA%` has no **osint-ai** folder.
 * The three desktop icons are gone.
 
-To start again later: run `wsl\Install.cmd`, then in GitHub Desktop use **Pull**
-to bring your skills and rules back.
+To start again later: run `windows\Install.cmd`, then in GitHub Desktop use
+**Pull** to bring your skills and rules back.
+
+On Linux there is less to remove: delete `~/.local/state/osint-ai` (sign-in,
+chat history, settings) and, if you do not want it any more, the checkout. Your
+work is on GitHub.
 
 ---
 

@@ -1,9 +1,10 @@
 # Validation checklist
 
-This layout is incompatible with pre-refactor installations. Existing private
-WSL distributions must be reinstalled (`wsl --unregister osint-ai`, then run
-`wsl\Install.cmd` again); the Windows checkout and its `workspace/` content are
-not touched by the installer.
+This layout is incompatible with installations made before the move to `scripts/`
+and `windows/`: those PCs still have the old root-owned copies in
+`/usr/local/lib/osint-ai`. Reinstall the private WSL distribution
+(`wsl --unregister osint-ai`, then run `windows\Install.cmd` again). The Windows
+checkout and its `workspace/` content are not touched by the installer.
 
 ## Automated Linux tests
 
@@ -17,7 +18,7 @@ backend selection and server process ownership/lifecycle with a fake local
 server. Integration tests explicitly skip when namespaces are blocked.
 
 ```powershell
-pwsh -NoProfile -File tests/Test-Installer.ps1     # parse wsl/Install.ps1, check escaping
+pwsh -NoProfile -File tests/Test-Installer.ps1     # parse windows/Install.ps1, check escaping
 ```
 
 Optional full Linux smoke test (installs the real environment, downloads
@@ -28,11 +29,15 @@ python3 tests/smoke_pixi_sandbox.py
 ```
 
 It installs the locked `default` environment, launches real Pi inside bubblewrap
-with the Windows-workspace layout, and verifies `/models` registration plus
+in the plain Linux (`--native`) layout, and verifies `/models` registration plus
 discovery of a skill under `workspace/.agents/skills/`, without any model API
-calls. Also run Bash syntax checks and ShellCheck over `wsl/scripts`, and install
-both Pixi environments to validate the local build recipes. Never claim Windows
-support based on the Python tests alone.
+calls. Also run Bash syntax checks and ShellCheck over `scripts/` and
+`windows/`, and install both Pixi environments to validate the local build
+recipes. Never claim Windows support based on the Python tests alone.
+
+There is no Linux installer to test, by design. The check is that a clean Linux
+VM follows the README's Linux commands and ends up at a chat prompt; when you
+cannot do that, say the Linux install is unverified.
 
 The Linux suite checks that the extension pins and the Pi version are what the
 repository claims, and that the intercom runtime directory is mounted as a

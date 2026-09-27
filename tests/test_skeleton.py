@@ -14,11 +14,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "wsl" / "scripts"
+SCRIPTS = ROOT / "scripts"
+WINDOWS = ROOT / "windows"
 
 
-def load_module(name):
-    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+def load_module(name, directory=SCRIPTS):
+    spec = importlib.util.spec_from_file_location(name, directory / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -26,7 +27,7 @@ def load_module(name):
 
 sandbox = load_module("sandbox")
 server = load_module("server")
-mounts = load_module("mount-workspace")
+mounts = load_module("mount-workspace", WINDOWS)
 
 SKILLS_PATH = "/workspace/.agents/skills"
 
@@ -82,18 +83,36 @@ class ConfigurationTests(unittest.TestCase):
         ):
             self.assertIn(package, data["dependencies"])
         tasks = data["tasks"]
-        self.assertEqual(tasks["osint-pi"], "bash wsl/scripts/launch-pi.sh native")
-        self.assertEqual(tasks["osint-pi-wsl"], "bash wsl/scripts/launch-pi.sh wsl")
+        self.assertEqual(tasks["osint-pi"], "bash scripts/bwrap-pi.sh --native")
+        self.assertEqual(tasks["osint-pi-wsl"], "bash scripts/bwrap-pi.sh --wsl")
         self.assertEqual(
-            tasks["restart-server"], "bash wsl/scripts/launch-server.sh restart"
+            tasks["restart-server"], "bash scripts/launch-server.sh restart"
         )
         for task in ("install", "start-server", "stop-server", "update-project", "test"):
             self.assertIn(task, tasks)
         # Every referenced script exists.
         for task, command in tasks.items():
-            match = re.search(r"(wsl/scripts/[\w.-]+)", command)
+            match = re.search(r"((?:scripts|windows)/[\w.-]+)", command)
             if match:
                 self.assertTrue((ROOT / match.group(1)).is_file(), task)
+
+    def test_provisioning_installs_files_that_exist(self):
+        """The Windows installer copies runtime files by name, so check the names.
+
+        A name that no longer exists only shows up as a failed install on some-
+        one else's PC, so the two install loops have to list exactly what is on
+        disk, in both directions.
+        """
+        script = (WINDOWS / "provision-wsl.sh").read_text()
+        for variable, directory in (("file", SCRIPTS), ("command", WINDOWS / "launchers")):
+            match = re.search(rf"for {variable} in (.*?); do", script, re.S)
+            self.assertIsNotNone(match, f"no 'for {variable} in ...' loop")
+            listed = set(match.group(1).replace("\\\n", " ").split())
+            self.assertEqual(
+                listed, {path.name for path in directory.iterdir() if path.is_file()}, variable
+            )
+        self.assertIn('install -m 755 "$HERE/mount-workspace.py"', script)
+        self.assertTrue((WINDOWS / "mount-workspace.py").is_file())
 
     def test_subagent_discovery_never_reads_skill_files(self):
         """Delegation scans the legacy ``.agents`` tree; skills must stay skills.
@@ -301,17 +320,24 @@ class ConfigurationTests(unittest.TestCase):
             "skill",
         ):
             self.assertIn(needle, readme, needle)
+        # A Linux user gets a short section, not a script to run.
+        for needle in ("Install on Linux", "pixi install --locked -e default", "pixi r osint-pi"):
+            self.assertIn(needle, readme, needle)
+        # The installer moved to windows/; stale paths must not come back.
+        self.assertIn(r"windows\Install.cmd", readme)
+        self.assertNotIn(r"wsl\Install.cmd", readme)
         # Deliberately not taught to beginners: branches and pull requests.
         self.assertNotIn("git branch", readme.lower())
         self.assertNotIn("pull request", readme.lower())
 
     def test_shell_syntax(self):
-        for file in [*SCRIPTS.rglob("*.sh"), *(SCRIPTS / "install").iterdir()]:
+        launchers = list((WINDOWS / "launchers").iterdir())
+        for file in [*SCRIPTS.glob("*.sh"), *WINDOWS.glob("*.sh"), *launchers]:
             with self.subTest(file=file):
                 subprocess.run(["/bin/bash", "-n", str(file)], check=True)
 
     def test_windows_bootstrap_is_non_destructive(self):
-        script = (ROOT / "wsl/Install.ps1").read_text()
+        script = (WINDOWS / "Install.ps1").read_text()
         self.assertNotIn("--unregister", script)
         self.assertNotIn("reset --hard", script)
         self.assertNotIn("git pull", script)
@@ -323,7 +349,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("$MobaXtermSha256", script)
         self.assertIn("$SkipMobaXterm", script)
         self.assertIn("/usr/local/bin/osint-terminal", script)
-        self.assertIn("/mnt/osint-ai/wsl/scripts/provision-wsl.sh", script)
+        self.assertIn("/mnt/osint-ai/windows/provision-wsl.sh", script)
 
 
 class MountTests(unittest.TestCase):
@@ -471,10 +497,10 @@ class SandboxFixture(unittest.TestCase):
         (self.project / f".pixi/envs/{sandbox.ENV_NAME}/bin").mkdir(parents=True)
         (self.project / f".pixi/envs/{sandbox.ENV_NAME}/bin/pi").write_text("#!/bin/sh\n")
         (self.workspace / ".agents/skills").mkdir(parents=True)
-        (self.project / "wsl/scripts").mkdir(parents=True)
+        (self.project / "scripts").mkdir(parents=True)
         (self.state / "agent-home").mkdir(parents=True)
         (self.project / ".git/config").write_text("private git configuration")
-        (self.project / "wsl/scripts/protected").write_text("original")
+        (self.project / "scripts/protected").write_text("original")
         (self.project / "pixi.toml").write_text("project manifest")
         (self.workspace / "AGENTS.md").write_text("workspace instructions")
         self.secret = self.root / "host-secret"
@@ -625,7 +651,7 @@ class SandboxArgumentTests(SandboxFixture):
         # Without a root-owned installation, the (developer-editable) checkout copy.
         self.assertEqual(
             self.argv()[-2:],
-            ["/bin/bash", "/opt/osint-ai/project/wsl/scripts/pi-entry.sh"],
+            ["/bin/bash", "/opt/osint-ai/project/scripts/pi-entry.sh"],
         )
 
     def test_protected_symlink_rejected(self):
@@ -705,11 +731,22 @@ class SandboxArgumentTests(SandboxFixture):
             mounts.directory_fd(link)
 
     def test_launcher_wrappers_exec_trusted_commands(self):
-        script = (SCRIPTS / "launch-pi.sh").read_text()
-        self.assertIn("/usr/local/bin/osint-pi-wsl", script)
+        """One launcher, two modes, and the installed shims pick the mode."""
+        script = (SCRIPTS / "bwrap-pi.sh").read_text()
         self.assertIn("sandbox.py", script)
-        self.assertIn("--native", (SCRIPTS / "install/osint-pi").read_text())
-        self.assertIn("--wsl", (SCRIPTS / "install/osint-pi-wsl").read_text())
+        self.assertIn("/usr/local/lib/osint-ai/sandbox.py", script)
+        self.assertIn("--native", (WINDOWS / "launchers/osint-pi").read_text())
+        self.assertIn("--wsl", (WINDOWS / "launchers/osint-pi-wsl").read_text())
+
+    def test_the_launcher_takes_only_a_mode_and_pi_arguments(self):
+        result = subprocess.run(
+            ["/bin/bash", str(SCRIPTS / "bwrap-pi.sh"), "not-a-mode"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--native|--wsl", result.stderr)
 
 
 class AgentGitTests(SandboxFixture):

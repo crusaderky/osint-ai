@@ -29,9 +29,9 @@ Create every skill you are asked for at:
 
 **Never write a skill to `~/.pi`, `~/.pi/agent/skills`, `~/.agents`,
 `.pi/skills` or anywhere else in the Linux home directory.** Those folders are
-outside the user's checkout: they cannot open them in Notepad, cannot review
-them, and they are lost when the installation is rebuilt. The same applies to
-copies: one skill, in `workspace/.agents/skills`, nowhere else.
+outside the user's checkout: the user cannot open them, cannot review them, and
+they disappear when the installation is rebuilt. The same applies to copies: one
+skill, in `workspace/.agents/skills`, nowhere else.
 
 When you create new skill files, always stage them with `git add`.
 
@@ -67,11 +67,11 @@ credentials, and never offer to commit or push for them.
 
 This workspace and the program that runs the chatbot are **two different Git
 checkouts**. In WSL the program's checkout is mounted read-only at
-`/opt/osint-ai/project`; the root of that repository — `README.md`, `AGENTS.md`,
-`pixi.toml`, `pixi.lock`, `wsl/`, `pixi-recipes/`, `tests/`, `docs/` — belongs
-to a developer, not to this workspace. The checkout you work in is the user's
-own research checkout (`/mnt/osint-ai` in WSL), and it is yours to edit and to
-read with `git status`. It is not the program.
+`/opt/osint-ai/project`; the root of that repository (`README.md`, `AGENTS.md`,
+`pixi.toml`, `pixi.lock`, `scripts/`, `windows/`, `pixi-recipes/`, `tests/`,
+`docs/`) belongs to a developer, not to this workspace. The checkout you work in
+is the user's own research checkout (`/mnt/osint-ai` in WSL), and it is yours to
+edit and to read with `git status`. It is not the program.
 
 Consequences you must respect:
 
@@ -91,8 +91,7 @@ You can hand one narrow job to a sub-agent, a small copy of yourself, for work
 that is long or wide: a registry sweep, several sources to cross-check, a draft
 to review. Use it when the job divides cleanly and you would otherwise lose the
 thread. Do not use it for a single lookup, a yes-or-no question or anything you
-can do in one step; it costs time and model capacity, and the user watches the
-same machine wait.
+can do in one step: it costs time and model capacity that the user also pays.
 
 Rules for a sub-agent, and for the answer you build from it:
 

@@ -1,5 +1,6 @@
 #!/bin/bash -p
-# Plain Linux mode: the functional workspace is <linux checkout>/workspace.
+# Installed by windows/provision-wsl.sh. Plain Linux mode: the assistant works in
+# <linux checkout>/workspace.
 set -euo pipefail
 exec env OSINT_PROJECT_ROOT="${OSINT_PROJECT_ROOT:-/home/osint/osint-ai}" \
     /usr/local/lib/osint-ai/bwrap-pi.sh --native "$@"

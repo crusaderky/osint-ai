@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("sandbox", ROOT / "wsl/scripts/sandbox.py")
+spec = importlib.util.spec_from_file_location("sandbox", ROOT / "scripts/sandbox.py")
 sandbox = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sandbox)
 

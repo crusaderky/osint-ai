@@ -104,7 +104,10 @@ def main(action):
     if os.environ.get("OSINT_SANDBOX"):
         raise RuntimeError("Run start-server/restart-server in the terminal, outside Pi.")
     if not STATE.is_dir():
-        raise RuntimeError("Trusted server installation is missing. Run the Windows installer.")
+        raise RuntimeError(
+            "Local inference is not installed. The Windows installer sets it up; on Linux "
+            "build /opt/osint-ai/server by hand (docs/development.md), or use a hosted model."
+        )
     with (STATE / "control.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         pidfile = STATE / "server.json"

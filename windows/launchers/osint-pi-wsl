@@ -1,0 +1,5 @@
+#!/bin/bash -p
+# Installed by windows/provision-wsl.sh. WSL mode: the assistant works in
+# /mnt/osint-ai/workspace, the workspace/ of the Windows checkout.
+set -euo pipefail
+exec /usr/local/lib/osint-ai/bwrap-pi.sh --wsl "$@"

@@ -1,11 +1,11 @@
 #!/usr/bin/python3
 """Build the agent's allowlisted mount namespace, then start Pi inside it.
 
-Two deployment modes share this file.
+Started by ``scripts/bwrap-pi.sh``, which passes one of two modes.
 
 ``native``
-    Plain Linux. The project root holds Git, ``pixi.toml`` and ``.pixi``. The
-    functional workspace is ``<project root>/workspace``.
+    Plain Linux. One checkout does everything: it holds Git, ``pixi.toml`` and
+    ``.pixi``, and ``<project root>/workspace`` is where the assistant works.
 
 ``wsl``
     Windows deployment. The same repository is checked out twice:
@@ -18,8 +18,7 @@ Two deployment modes share this file.
     The agent works in the Windows checkout, which is bound read-write with its
     ``.git``, while the Linux checkout stays read-only at
     ``/opt/osint-ai/project`` so the program that starts Pi cannot be changed
-    from inside a session. In plain Linux there is only one checkout, so the
-    project root is the writable one.
+    from inside a session.
 
 Nothing the sandboxed agent can write is executed outside the sandbox; the
 read-only ``.pixi`` environment supplies the Pi binary and the command-line
@@ -225,7 +224,7 @@ def build_command(
     # Installed copies are authoritative when present; a plain Linux checkout
     # only has its own (developer-editable) copy.
     installed = Path("/usr/local/lib/osint-ai/pi-entry.sh")
-    entry = installed if installed.is_file() else PROJECT_MOUNT / "wsl/scripts/pi-entry.sh"
+    entry = installed if installed.is_file() else PROJECT_MOUNT / "scripts/pi-entry.sh"
     env = {
         "HOME": "/home/osint",
         "USER": "osint",
