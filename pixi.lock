@@ -90,7 +90,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/linux-64/pango-1.58.2-h7bb47b9_1.conda
       - conda: https://prefix.dev/conda-forge/linux-64/pcre2-10.47-h8b3dc9c_1.conda
       - conda: https://prefix.dev/conda-forge/linux-64/perl-5.44.0-0_h7cc23a3_perl5.conda
-      - conda: https://prefix.dev/conda-forge/linux-64/pi-coding-agent-0.86.1-hd412ae8_0.conda
+      - conda: https://prefix.dev/conda-forge/linux-64/pi-coding-agent-0.87.1-hd412ae8_0.conda
       - conda: https://prefix.dev/conda-forge/linux-64/pillow-12.3.0-py314h50bfbbb_4.conda
       - conda: https://prefix.dev/conda-forge/linux-64/pixman-0.46.4-h54a6638_3.conda
       - conda: https://prefix.dev/conda-forge/linux-64/poppler-26.09.0-h0b47b50_0.conda
@@ -138,7 +138,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/noarch/weasyprint-69.0-pyhcf101f3_0.conda
       - conda: https://prefix.dev/conda-forge/noarch/webencodings-0.5.1-pyhd8ed1ab_3.conda
       - conda: https://prefix.dev/conda-forge/noarch/xlrd-2.0.2-pyhd8ed1ab_0.conda
-      - conda_source: pi-extensions[c836947d] @ pixi-recipes/pi-extensions
+      - conda_source: pi-extensions[8ba02125] @ pixi-recipes/pi-extensions
       - conda_source: pi-home[77a9d247] @ pixi-recipes/pi-home
   llamacpp-binary-cuda:
     channels:
@@ -157,7 +157,7 @@ environments:
       - conda: https://prefix.dev/conda-forge/noarch/ca-certificates-2026.7.22-hbd8a1cb_0.conda
       - conda: https://prefix.dev/conda-forge/noarch/cuda-cudart_linux-64-13.3.29-h376f20c_0.conda
       - conda: https://prefix.dev/conda-forge/noarch/cuda-version-13.3-hcbadf70_3.conda
-      - conda_source: llama-cpp[726a1fa5] @ pixi-recipes/llama-cpp-binary
+      - conda_source: llama-cpp[f07329be] @ pixi-recipes/llama-cpp-binary
 packages:
 - conda: https://prefix.dev/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -1406,16 +1406,16 @@ packages:
     - perl >=5.44.0,<6.0a0
   size: 11516819
   timestamp: 1790272817683
-- conda: https://prefix.dev/conda-forge/linux-64/pi-coding-agent-0.86.1-hd412ae8_0.conda
-  sha256: 5daffb2b55723e8de6a9475717e581df1fa9ecc4e7678f2073604c38184679b3
-  md5: 013a435e4d81b2b4619fc6fa7fe290df
+- conda: https://prefix.dev/conda-forge/linux-64/pi-coding-agent-0.87.1-hd412ae8_0.conda
+  sha256: b4727cbcc7354705457c90757491c6640aef9585b437d135bbf0abcb75216abb
+  md5: 6f1a06f1f8d50e23cf89267043cacc88
   depends:
   - nodejs >=20.6.0
   license: MIT
   license_family: MIT
   run_exports: {}
-  size: 23161986
-  timestamp: 1789910315499
+  size: 23326820
+  timestamp: 1790112097319
 - conda: https://prefix.dev/conda-forge/linux-64/pillow-12.3.0-py314h50bfbbb_4.conda
   sha256: d662d735be70bea19172bb9fc8eade16ec88a82459ee9c9497788bd0d52c468e
   md5: 2180323126daa9971a80cc679cf12f46
@@ -2050,7 +2050,7 @@ packages:
   run_exports: {}
   size: 93671
   timestamp: 1756170155688
-- conda_source: llama-cpp[726a1fa5] @ pixi-recipes/llama-cpp-binary
+- conda_source: llama-cpp[f07329be] @ pixi-recipes/llama-cpp-binary
   variants:
     backend: cuda
     target_platform: linux-64
@@ -2072,7 +2072,7 @@ packages:
   - conda: https://prefix.dev/conda-forge/linux-64/libgomp-16.2.0-he0feb66_7.conda
   - conda: https://prefix.dev/conda-forge/linux-64/libstdcxx-16.2.0-h934c35e_7.conda
   - conda: https://prefix.dev/conda-forge/linux-64/patchelf-0.19.1-hee9eb32_1.conda
-- conda_source: pi-extensions[c836947d] @ pixi-recipes/pi-extensions
+- conda_source: pi-extensions[8ba02125] @ pixi-recipes/pi-extensions
   variants:
     target_platform: linux-64
   depends:
@@ -2096,7 +2096,7 @@ packages:
   - conda: https://prefix.dev/conda-forge/linux-64/nodejs-26.10.0-ha5cdc1e_0.conda
   - conda: https://prefix.dev/conda-forge/linux-64/openssl-3.6.4-h781a0a9_0.conda
   - conda: https://prefix.dev/conda-forge/linux-64/patchelf-0.19.1-hee9eb32_1.conda
-  - conda: https://prefix.dev/conda-forge/linux-64/pi-coding-agent-0.86.1-hd412ae8_0.conda
+  - conda: https://prefix.dev/conda-forge/linux-64/pi-coding-agent-0.87.1-hd412ae8_0.conda
   - conda: https://prefix.dev/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_7.conda
   - conda: https://prefix.dev/conda-forge/noarch/ca-certificates-2026.7.22-hbd8a1cb_0.conda
 - conda_source: pi-home[77a9d247] @ pixi-recipes/pi-home
