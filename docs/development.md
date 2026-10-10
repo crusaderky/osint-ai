@@ -41,9 +41,22 @@ on its own has no `.git` above it and every `git status` the guidance promises
 fails with "not a git repository".
 
 That separation is the reason `pixi.toml` edited in the Windows checkout changes
-nothing that runs. The user pushes from the Windows Git GUI and the Linux side is
-updated with `update-project`. The runtime never rsyncs, symlinks or duplicates
-anything between them.
+nothing that runs. The runtime never rsyncs, symlinks or duplicates anything
+between them. Instead, one command per deployment keeps them in step, and both
+run the same branch helper, `scripts/git-branches.sh`:
+
+| Deployment | Command | What it does |
+| --- | --- | --- |
+| Plain Linux | `pixi r update-project` | fast-forwards `main`, fast-forwards `staging`, merges `main` into `staging` |
+| Windows | the **Update OSINT AI** desktop shortcut | the same for the Windows checkout, plus the Linux checkout's `main` and its Pixi environments, plus the root-owned runtime in `/usr/local` |
+
+The branch rule is the same everywhere: `main` is the published program and only
+ever moves forward; `staging` receives it and keeps whatever the assistant has
+committed but not published. A checkout with no `staging` branch - the WSL
+program checkout is cloned with `--branch main` on purpose - only fast-forwards
+its `main`. Nothing is ever pushed, discarded, rebased or conflict-resolved: a
+checkout that cannot be updated is left exactly as it was, and a branch that
+moved on in two places is reported for the human to reconcile in their Git app.
 
 ## One launcher, two arguments
 
@@ -75,7 +88,13 @@ Ubuntu needs an AppArmor profile for that path; `pixi r install` loads it and th
 proves the binary can start a sandbox. When the root-owned
 copies in `/usr/local/lib/osint-ai` exist they are used instead of the checkout
 copies, so an installed PC runs the code it installed rather than whatever the
-checkout happens to contain. In `wsl` mode the Linux checkout is read-only at
+checkout happens to contain. Those copies are installed by
+`windows/install-runtime.sh`: on the first installation from the checkout being
+installed, on a later run of Install.cmd from the Linux program checkout when it
+already carries the installer and otherwise from the checkout being installed, and
+on every click of the Update OSINT AI icon from the Linux program checkout - which
+is why a change to `scripts/` reaches an installed PC at all. In `wsl` mode the
+Linux checkout is read-only at
 `/opt/osint-ai/project` with its `.git` masked, and the Windows checkout is
 mounted read-write at `/osint-ai`. In `native` mode the single checkout is
 mounted read-write at `/osint-ai` and `.pixi` is re-mounted read-only on top of
@@ -147,12 +166,14 @@ The installer:
   answers, then starts the assistant),
   **OSINT AI Terminal (basic)** (plain `wsl.exe` console),
   **Start llama.cpp** and **Stop llama.cpp** (the same `_server` task the Linux
-  deployment runs, in the Windows checkout's environment) and
+  deployment runs, in the Windows checkout's environment),
+  **Update OSINT AI** (see below) and
   **OSINT AI Files** (Windows checkout).
-- Preserves user state on a completed-install rerun; it does not update the
-  trusted runtime. There is no automatic updater in this skeleton, and because the
-  root-owned launchers are installed once, an installation that predates this
-  design has to be reinstalled rather than upgraded in place.
+- Preserves user state on a completed-install rerun, and reinstalls the
+  root-owned runtime (`windows/install-runtime.sh`) - preferring the Linux checkout,
+  which the assistant cannot write - so a rerun is also how a PC installed before a
+  change to `scripts/` gets it. The Windows checkout is never reset, and nothing is
+  discarded.
 
 Uninstalling is manual and documented for users in the README. In short:
 `wsl --unregister osint-ai` deletes the private distribution and its disk, which
@@ -165,6 +186,32 @@ place: `%USERPROFILE%\.cache\huggingface` on the Windows side, and
 installer added is named `OSINT AI local inference`. The Windows checkout,
 including `workspace/`, and everything pushed to GitHub survive all of that, and
 `wsl.exe` plus the Windows feature stay installed for other software.
+
+### Updating an installed deployment
+
+The **Update OSINT AI** shortcut is the one human-run update path, and it is never
+a startup or agent path. Its wrapper lives outside both checkouts
+(`%LOCALAPPDATA%\osint-ai\update-osint-ai.cmd`), so it cannot change with the
+commit a checkout happens to be on, and it runs three steps:
+
+1. `windows/update-installation.sh` inside WSL, as root, which updates the Linux
+   program checkout and its Pixi environments as the `osint` user, then reinstalls
+   the root-owned runtime in `/usr/local` from that checkout
+   (`windows/install-runtime.sh`), then updates the Windows checkout with the same
+   branch dance as the user who owns it.
+2. The local model server is stopped, so that its build can be replaced.
+3. The native `llamacpp-binary-vulkan` environment of the Windows checkout is
+   installed from the updated manifest, with `--locked`.
+
+Everything that writes to a checkout or an environment runs as `osint`, never as
+root: the Windows checkout's `.git` is writable by the assistant, and Git runs
+whatever hooks it finds there. Root is used for `/usr/local` and for mounting the
+Windows drive, and the Windows checkout's origin is pinned to the Linux
+checkout's, which the assistant cannot write - see [security.md](security.md). The
+update refuses a checkout with uncommitted work, a checkout on any branch other
+than `main` or `staging`, and a checkout whose origin does not match, and it stops
+rather than leaving a half-applied state. `docs/testing.md` lists what only a real
+Windows PC can confirm.
 
 `pixi r install` is two scripts. `scripts/install-apparmor.sh` is the only root
 step a Linux installation has: it asks for your own password, changes nothing when
@@ -301,21 +348,23 @@ that still need Windows validation.
 | `pixi r osint-pi-wsl` | Assistant in `workspace/` of the Windows checkout |
 | `pixi r install` | Load the AppArmor profile Ubuntu needs for the pinned bubblewrap, then the installation check and usage summary |
 | `pixi r start-server` / `stop-server` / `restart-server` | Local inference outside the sandbox on `127.0.0.1:8080`, GPU with automatic CPU fallback. `start-server` and `restart-server` run in the `llamacpp-binary-vulkan` environment, which Pixi installs when it is missing; `stop-server` runs in the default environment and installs nothing |
-| `pixi r update-project` | Trusted maintenance: `git pull --ff-only`, then `pixi install --locked -e default` and the inference environment when it is installed |
+| `pixi r update-project` | Trusted maintenance: fast-forwards `main`, fast-forwards `staging` and merges `main` into `staging` (`scripts/git-branches.sh`), then `pixi install --locked -e default` and the inference environment when it is installed |
 | `pixi r test` | Python test suite |
 
 The launcher tasks are thin wrappers: they `exec` the root-owned launcher in
 `/usr/local/bin` when it is installed, and otherwise the copy next to this
 manifest. The outer Pixi process therefore only reads the manifest of the
 checkout it runs from, never anything a sandboxed agent could have modified.
-`update-project` and the Windows installer are deliberate, human-run operations.
-Never wire them into startup or into the sandbox.
-
+`update-project`, the Windows installer and the **Update OSINT AI** icon are
+deliberate, human-run operations. Never wire them into startup or into the sandbox.
 Inside WSL these commands are also installed as `osint-pi`, `osint-pi-wsl`,
 `osint-terminal`, `start-server`, `stop-server`, `restart-server` and
 `update-project`. `osint-terminal` is what the desktop shortcut runs; the Start and
 Stop llama.cpp icons run the Windows environment's `_server` task directly, because
-the server they control is not inside the distribution.
+the server they control is not inside the distribution. The Update OSINT AI icon
+runs `update-project` for the Linux checkout, the runtime refresh and the Windows
+checkout's dance, then reinstalls the native llama.cpp environment from the
+wrapper outside both checkouts.
 
 ## Skills and dependency changes
 
@@ -355,8 +404,9 @@ package with its version and build, `ls "$CONDA_PREFIX/bin"` for the commands it
 can run. `pip list` works there too, but it covers only the Python libraries and
 omits tools such as pandoc and poppler.
 
-Commit `pixi.toml` and `pixi.lock` together, then have each WSL installation run
-`update-project`. Users review and publish with a Windows Git GUI. The chatbot
+Commit `pixi.toml` and `pixi.lock` together, then have each installation update
+itself: the **Update OSINT AI** icon on Windows, `pixi r update-project` on Linux.
+Users review and publish with a Windows Git GUI. The chatbot
 runs Git in its own checkout: it reads status, and it may `git add` and
 `git commit` a finished unit of work, but its guidance keeps it on `staging` - it
 may switch `main` -> `staging` and merge `main` into `staging` - and forbids
@@ -365,7 +415,10 @@ change. It has no
 access to the Linux checkout's repository. The launcher gives those commits an
 author (`OSINT AI assistant <assistant@osint-ai.invalid>`, set as
 `GIT_AUTHOR_*` and `GIT_COMMITTER_*`), because the agent home has no
-`~/.gitconfig` and Git refuses to commit without an identity.
+`~/.gitconfig` and Git refuses to commit without an identity. An installed
+checkout usually has no identity either, so when the update has to create a merge
+commit it sets `OSINT AI update <update@osint-ai.invalid>` for that one command,
+and only when the checkout has none of its own.
 
 ## Providers and local inference
 
@@ -410,8 +463,9 @@ is never stored in a file the user could edit and why the model list is generate
 rather than shipped.
 
 `pixi r update-project` updates the Linux inference environment together with the
-assistant's, and rerunning the Windows installer refreshes the Windows side the same
-way, so `models.ini` and the inference recipes never drift apart from the binary.
+assistant's, and the **Update OSINT AI** icon does that and then reinstalls the
+Windows environment from the updated manifest, so `models.ini` and the inference
+recipes never drift apart from the binary.
 
 Pi's built-in llama.cpp provider lists the models and its `/llama` command loads,
 unloads and downloads them; `pi-llama-cpp` used to do that and is gone, so there is

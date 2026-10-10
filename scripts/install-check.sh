@@ -76,6 +76,14 @@ if ((wsl_deployment)); then
     else
         need "$out"
     fi
+    # The one command that refreshes the root-owned runtime under /usr/local. An
+    # installation that predates it still works and still starts; it just cannot
+    # pick up a change to scripts/ until Install.cmd installs it.
+    if [[ -f /usr/local/lib/osint-ai/update-installation.sh ]]; then
+        say ok "Update OSINT AI helper (/usr/local/lib/osint-ai/update-installation.sh)"
+    else
+        say none "the Update OSINT AI helper is not installed; run windows\\Install.cmd from Windows to add it"
+    fi
 else
     say ok "plain Linux checkout ($root)"
 fi

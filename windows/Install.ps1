@@ -7,6 +7,8 @@
 #   Windows checkout  <- you edit skills and commit with a Windows Git GUI
 #   WSL /mnt/osint-ai <- that same checkout, mounted at every terminal start
 #   WSL /home/osint/osint-ai <- second checkout that owns Pixi and runs everything
+#   /usr/local/lib/osint-ai  <- root-owned runtime inside the distro, installed
+#                               here and refreshed by the Update OSINT AI icon
 #
 # Local inference is the exception: llama.cpp runs *natively* on Windows, in the
 # Windows checkout's own Pixi environment, outside WSL, where it reaches the GPU
@@ -399,6 +401,23 @@ if config['windows_project'] != sys.argv[1]:
 PY
     /usr/local/lib/osint-ai/mount-workspace.py
     sync_staging || exit 1
+    # The root-owned runtime is installed once, so a PC that predates a change
+    # keeps running what it installed until something refreshes it. Prefer the
+    # Linux checkout: the sandbox mounts it read-only and the assistant cannot
+    # write it. A checkout old enough to have no installer at all falls back to the
+    # checkout this run came from, which is the trust provisioning already has.
+    runtime_installer=$LINUX_PROJECT/windows/install-runtime.sh
+    runtime_source=$LINUX_PROJECT
+    if [[ ! -f $runtime_installer ]]; then
+        runtime_installer=/mnt/osint-ai/windows/install-runtime.sh
+        runtime_source=/mnt/osint-ai
+    fi
+    if [[ -f $runtime_installer ]]; then
+        /bin/bash "$runtime_installer" "$runtime_source"
+    else
+        echo 'Neither checkout has windows/install-runtime.sh, so the installed runtime was left as it is.' >&2
+        echo 'Pull the newest version in your Git app, then run Install.cmd again.' >&2
+    fi
     echo 'Already installed. Existing checkouts, credentials, and environments were preserved.'
     exit 0
 fi
@@ -521,6 +540,43 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
         )
     }
 
+    # The Update icon: one click brings the two checkouts up to date, refreshes the
+    # root-owned runtime inside WSL, and reinstalls the native llama.cpp build. A
+    # plain wrapper outside the checkout, like the two above, so it stays identical
+    # no matter which commit the Windows checkout is on.
+    $updateWrapper = Join-Path $InstallRoot 'update-osint-ai.cmd'
+    Set-Content -LiteralPath $updateWrapper -Encoding ASCII -Value @(
+        '@echo off',
+        'setlocal',
+        'echo Updating OSINT AI. The newest program is fetched from GitHub.',
+        'echo.',
+        "wsl.exe -d $Distro -u root -e /bin/bash /usr/local/lib/osint-ai/update-installation.sh",
+        'set "wsl_status=%ERRORLEVEL%"',
+        'echo.',
+        'echo Stopping the local model server so that its build can be replaced...',
+        "`"$pixi`" run --locked -e llamacpp-binary-vulkan --manifest-path `"$manifest`" _server stop",
+        'echo.',
+        'echo Updating the local llama.cpp build...',
+        "`"$pixi`" install --locked -e llamacpp-binary-vulkan --manifest-path `"$manifest`"",
+        'set "build_status=%ERRORLEVEL%"',
+        'echo.',
+        'if not "%build_status%"=="0" goto failed',
+        'if "%wsl_status%"=="0" goto done',
+        'if "%wsl_status%"=="2" goto attention',
+        'goto failed',
+        ':done',
+        'echo Updated. Click "Start llama.cpp" when you want local models again.',
+        'goto end',
+        ':attention',
+        'echo Updated, but something above needs your attention. Fix it, then run Update OSINT AI again.',
+        'goto end',
+        ':failed',
+        'echo The update did not finish. Read the messages above, fix what they name, then run Update OSINT AI again.',
+        ':end',
+        'echo.',
+        'pause'
+    )
+
     $moba = Install-MobaXterm
     $shell = New-Object -ComObject WScript.Shell
     $desktop = [Environment]::GetFolderPath('Desktop')
@@ -559,8 +615,15 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
     $stop.TargetPath = $stopInference
     $stop.Description = 'Stop the local AI model server.'
     $stop.Save()
+    # Updating the program: the checkouts, the runtime inside WSL and the local
+    # model server. A deliberate click, never a startup path.
+    $update = $shell.CreateShortcut((Join-Path $desktop 'Update OSINT AI.lnk'))
+    $update.TargetPath = $updateWrapper
+    $update.Description = 'Fetch the newest OSINT AI program, and update the local model server.'
+    $update.Save()
     Write-Host "`nReady. Open 'OSINT AI Terminal' and wait for the chatbot prompt."
     Write-Host "Local models run on Windows itself: click 'Start llama.cpp', then choose one with /model. No GPU is required; without a Vulkan-capable one it uses the processor and is slower."
+    Write-Host "For program updates click 'Update OSINT AI': it fetches the newest version into both checkouts and updates the local model server."
     Write-Host "Your skills are in $ProjectPath\workspace\.agents. Review and commit them in your Windows Git app."
 } catch {
     Write-Host "`nInstallation stopped: $($_.Exception.Message)" -ForegroundColor Red

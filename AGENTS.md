@@ -17,8 +17,8 @@ verifiable solutions and explain results in plain language.
 | `README.md` | Absolute-beginner guide: install, Git, Pi commands, AGENTS.md, skills. Keep it jargon-free. It stays at the root because it is where a Windows user is pointed. |
 | `AGENTS.md` | This file: instructions for maintaining the project. The sandboxed assistant does not load it; see the rules below. |
 | `workspace/` | The **functional** workspace. Its own `AGENTS.md` (the assistant's only instructions) and `.agents/skills/` drive the chatbot; that is a different job from this one. It is the assistant's working directory: `/osint-ai/workspace` inside the sandbox. |
-| `scripts/` | The runtime, shared by both deployments: `bwrap-pi.sh` (the one sandbox launcher), `sandbox.py`, `pi-entry.sh`, the inference server controller, `update-project.sh`, `install-check.sh`, `install-apparmor.sh`. |
-| `windows/` | Everything only the Windows deployment uses: `Install.cmd`, `Install.ps1`, `provision-wsl.sh`, the boot mount helper, and `launchers/` (the copies installed to `/usr/local/bin`). The bash scripts in here run inside the WSL distro the installer creates. |
+| `scripts/` | The runtime, shared by both deployments: `bwrap-pi.sh` (the one sandbox launcher), `sandbox.py`, `pi-entry.sh`, the inference server controller, `git-branches.sh` (the main/staging branch dance, one implementation for both checkouts), `update-project.sh`, `install-check.sh`, `install-apparmor.sh`. |
+| `windows/` | Everything only the Windows deployment uses: `Install.cmd`, `Install.ps1`, `provision-wsl.sh`, `install-runtime.sh` (the one list of root-owned files), `update-installation.sh` (the WSL half of the **Update OSINT AI** icon), the boot mount helper, and `launchers/` (the copies installed to `/usr/local/bin`). The bash scripts in here run inside the WSL distro the installer creates. |
 | `pixi-recipes/` | Local build recipes: Pi, extensions, the bundled home configuration, the Vulkan llama.cpp binary. |
 | `models.ini` | Inference presets snapshot used by the installed runtime. `LFM2.5-230M` is unit-test only: the CI smoke test asks that preset, nothing else uses it. The same preset names are listed in `pixi-recipes/pi-home/models.json`, which the launcher turns into the assistant's model list; a test keeps the two in step. |
 | `model-shortlist.json` | The models the assistant is offered. `scripts/pi-entry.sh` merges its `enabledModels` list into the agent's `~/.pi/agent/settings.json` on every start, additively: missing entries are added, a model the user saved stays, nothing is duplicated. Read from the program checkout, so on Windows the agent cannot widen its own model list. Current as of 2026-10-10 and expected to change. |
@@ -39,14 +39,18 @@ argument differs:
 On Windows the repository exists twice, by design:
 
 * `/home/osint/osint-ai` — Linux checkout. Owns `pixi.toml`, the Pixi
-  environments and the code that executes. A maintainer updates it with
-  `update-project`. Mounted read-only in the sandbox, with its `.git` masked.
+  environments and the code that executes. It stays on the published `main`, and
+  is fast-forwarded by `update-project` (the Linux command) or by the Windows
+  **Update OSINT AI** icon. Mounted read-only in the sandbox, with its `.git`
+  masked.
 * `C:\Users\<name>\osint-ai`, mounted at `/mnt/osint-ai` — Windows checkout. The
   user edits `workspace/` there and publishes with a Windows Git GUI. Mounted
   whole and read-write in the sandbox at `/osint-ai`, `.git` included, so the
   assistant can run `git status` and commit there itself. `staging` is the only
   development branch: the installer checks it out, the assistant is told to work
-  on it and never on `main`, and it never pushes or discards work.
+  on it and never on `main`, and it never pushes or discards work. The Windows
+  update brings `main` back into `staging`, exactly as the assistant's own
+  guidance tells it to.
 
 `bwrap-pi.sh --wsl` binds the Linux checkout **read-only** at
 `/opt/osint-ai/project` and the Windows checkout **read-write** at `/osint-ai`,
@@ -54,7 +58,9 @@ then starts Pi in `/osint-ai/workspace`. `bwrap-pi.sh --native` mounts the singl
 checkout read-write at `/osint-ai` and re-binds `.pixi` read-only on top of it.
 The sandboxed agent sees neither root-owned file and cannot change the program.
 Tell the user that changes to the program's own files happen in the project root
-checkout, followed by `update-project` on the WSL side.
+checkout, followed by `update-project` on the WSL side, or by the **Update OSINT
+AI** desktop icon, which runs that and refreshes the root-owned runtime in
+`/usr/local/lib/osint-ai` from the Linux checkout.
 
 The checkout is always mounted whole, never as a bare `workspace/` bind: Git
 walks up from the working directory looking for `.git`, so a workspace mounted on
@@ -114,7 +120,7 @@ pixi r osint-pi             # chatbot in workspace/ of this checkout (plain Linu
 pixi r osint-pi-wsl         # chatbot in workspace/ of the Windows checkout
 pixi r install              # make the pinned bubblewrap allowed to run, then report what is missing
 pixi r start-server         # local inference on 127.0.0.1:8080, running in the llamacpp-binary-vulkan environment that Pixi installs; CPU fallback when no Vulkan device available
-pixi r update-project       # trusted: git pull --ff-only + pixi install --locked -e default (and inference when installed)
+pixi r update-project       # trusted: fast-forward main, fast-forward staging and merge main into it (scripts/git-branches.sh), then pixi install --locked -e default (and inference when installed)
 ```
 
 For code maintenance you run Pi yourself, unsandboxed, in this checkout:
@@ -183,7 +189,15 @@ dependencies; it must ask instead.
   environment, which the agent may write to, so the human reviews that checkout
   before clicking a desktop icon that runs it. Keep `--locked` on those pixi
   commands so a manifest that does not match the lock fails instead of quietly
-  installing something else. The agent's own
+  installing something else. The **Update OSINT AI** icon is the one update path an
+  installed PC has, and it is held to the same rule: human-started, never a startup
+  path, root only for `/usr/local` and the Windows mount, every checkout and
+  environment written as `osint`, the Windows checkout's origin pinned to the Linux
+  checkout's, its Git hooks, fsmonitor and pager switched off, and a checkout with
+  unsaved work, another branch or a split history refused rather than resolved.
+  (On a machine that runs policy hooks, `-c core.hooksPath=/dev/null` and
+  `-c core.fsmonitor=false` in `scripts/git-branches.sh` are deliberate, not an
+  oversight.) The agent's own
   checkout is writable on purpose, `.git` included; guidance keeps it on
   `staging` (it may switch `main` -> `staging` and merge `main` into `staging`)
   and forbids it from publishing, and the human reviews every change. The

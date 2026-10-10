@@ -391,24 +391,6 @@ class ConfigurationTests(unittest.TestCase):
         parse_test = (ROOT / "tests/Test-Installer.ps1").read_text()
         self.assertIn('-replace "`r`n", "`n"', parse_test)
 
-    def test_provisioning_installs_files_that_exist(self):
-        """The Windows installer copies runtime files by name, so check the names.
-
-        A name that no longer exists only shows up as a failed install on some-
-        one else's PC, so the two install loops have to list exactly what is on
-        disk, in both directions.
-        """
-        script = (WINDOWS / "provision-wsl.sh").read_text()
-        for variable, directory in (("file", SCRIPTS), ("command", WINDOWS / "launchers")):
-            match = re.search(rf"for {variable} in (.*?); do", script, re.S)
-            self.assertIsNotNone(match, f"no 'for {variable} in ...' loop")
-            listed = set(match.group(1).replace("\\\n", " ").split())
-            self.assertEqual(
-                listed, {path.name for path in directory.iterdir() if path.is_file()}, variable
-            )
-        self.assertIn('install -m 755 "$HERE/mount-workspace.py"', script)
-        self.assertTrue((WINDOWS / "mount-workspace.py").is_file())
-
     def test_provisioning_creates_only_inference_state(self):
         """The Windows installer must not pre-create the assistant's state.
 
@@ -424,6 +406,85 @@ class ConfigurationTests(unittest.TestCase):
         # Model weights are in the standard Hugging Face cache under the osint
         # user's home: not root-owned state under /var/lib.
         self.assertNotIn("models", script)
+
+    def test_the_runtime_is_installed_from_one_file_list(self):
+        """One list of root-owned files, used by every path that installs them.
+
+        The list used to live in provisioning alone, so a PC that had already been
+        installed kept whatever it installed first. It is now in
+        windows/install-runtime.sh, and the first installation, every later run of
+        Install.cmd and every click of the Update OSINT AI icon all use it.
+        """
+        script = (WINDOWS / "install-runtime.sh").read_text()
+        # Everything in scripts/ is part of the runtime, so a new helper is
+        # installed without touching the list, and the launchers are the commands
+        # an installed PC runs by name.
+        self.assertIn('for file in "$source_checkout"/scripts/*', script)
+        self.assertIn('for command in "$source_checkout"/windows/launchers/*', script)
+        for name in ("mount-workspace.py", "update-installation.sh", "install-runtime.sh"):
+            self.assertIn(name, script)
+        self.assertTrue((WINDOWS / "mount-workspace.py").is_file())
+        self.assertIn(
+            '/bin/bash "$HERE/install-runtime.sh" "$REPO"',
+            (WINDOWS / "provision-wsl.sh").read_text(),
+        )
+        self.assertIn(
+            "/mnt/osint-ai/windows/install-runtime.sh",
+            (WINDOWS / "Install.ps1").read_text(),
+        )
+        self.assertIn(
+            'runtime_installer=$linux/windows/install-runtime.sh',
+            (WINDOWS / "update-installation.sh").read_text(),
+        )
+
+    def test_the_update_command_carries_the_branch_rule(self):
+        """main fast-forwarded, staging fast-forwarded and given main - once.
+
+        The rule used to be a plain `git pull --ff-only`, which left `main` behind
+        `staging`'s checkout at whatever it was cloned at. Both checkouts run the
+        same helper now, and a refusal means nothing was installed either.
+        """
+        command = (SCRIPTS / "update-project.sh").read_text()
+        self.assertIn('source "$here/git-branches.sh"', command)
+        self.assertNotIn("git pull", command)
+        self.assertLess(command.index("sync_branches"), command.index("install --locked"))
+        self.assertIn("if ((status == 1)); then", command)
+        helper = (SCRIPTS / "git-branches.sh").read_text()
+        for needle in (
+            "checkout --quiet main",
+            "merge --ff-only origin/main",
+            "checkout --quiet staging",
+            "merge --ff-only origin/staging",
+            "merge --no-edit main",
+            "merge --abort",
+        ):
+            self.assertIn(needle, helper, needle)
+        # Hooks and fsmonitor commands come from the checkout being updated, which
+        # the assistant can write in the Windows deployment.
+        self.assertIn("core.hooksPath=/dev/null", helper)
+        self.assertIn("core.fsmonitor=false", helper)
+        self.assertIn("core.pager=cat", helper)
+        # Nothing in the helper pushes, whatever a branch looks like.
+        self.assertIsNone(re.search(r"(?:sync_git|git)[^\n|]*\bpush\b", helper))
+
+    def test_the_windows_updater_writes_checkouts_as_the_user_not_as_root(self):
+        """Root installs files; the checkouts belong to `osint`.
+
+        The Windows checkout is writable by the assistant, `.git` included, and Git
+        runs whatever hooks it finds there. Dropping to the checkout's owner keeps a
+        planted hook at the privilege the assistant already has, and the update
+        still needs root for /usr/local and for mounting the Windows drive.
+        """
+        script = (WINDOWS / "update-installation.sh").read_text()
+        self.assertIn("runuser -u osint", script)
+        for line in script.splitlines():
+            if re.match(r"\s*(command )?git\b", line):
+                self.fail(f"the updater runs Git as root: {line.strip()!r}")
+        # The runtime is refreshed from the checkout that was just updated, before
+        # the Windows checkout is walked with the helper from that refresh.
+        self.assertLess(script.index("install-runtime.sh"), script.index("git-branches.sh"))
+        self.assertIn("expected_origin=", script)
+        self.assertIn("OSINT_SANDBOX", script)
 
     def test_apparmor_profile_names_the_pinned_bubblewrap(self):
         """Ubuntu 23.10+ grants `userns` per executable path, so name ours.
@@ -853,6 +914,22 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("checkout main", script)
         self.assertNotIn("git switch", script)
         self.assertEqual(script.count("sync_staging || exit 1"), 2, "every path must sync")
+        # A completed installation refreshes the root-owned runtime from the
+        # checkout the human installed, so a PC that predates a change is updated
+        # instead of being told to reinstall.
+        self.assertIn("/mnt/osint-ai/windows/install-runtime.sh", script)
+        # The Linux checkout is preferred when it has the installer: the sandbox
+        # mounts it read-only, so the assistant cannot write what gets installed as
+        # root, and a checkout too old to carry one falls back to the other.
+        self.assertIn("runtime_installer=$LINUX_PROJECT/windows/install-runtime.sh", script)
+        # The Update icon: a wrapper outside the checkout, so it cannot change with
+        # the commit the checkout is on, and it reinstalls the native inference
+        # environment from the checkout the WSL side just updated.
+        self.assertIn("update-osint-ai.cmd", script)
+        self.assertIn("'Update OSINT AI.lnk'", script)
+        self.assertIn("/usr/local/lib/osint-ai/update-installation.sh", script)
+        self.assertIn("--locked -e llamacpp-binary-vulkan", script)
+        self.assertIn("-e llamacpp-binary-vulkan --manifest-path", script)
         self.assertIn("--no-distribution", script)
         self.assertIn("Get-FileHash", script)
         self.assertIn("Restart Windows", script)
@@ -2365,6 +2442,218 @@ class SandboxBoundaryTests(SandboxFixture):
                 f"import socket; socket.create_connection(('127.0.0.1', {port}), timeout=2).close()"
             )
             subprocess.run(self.argv(["/usr/bin/python3", "-c", code]), check=True)
+
+
+class BranchUpdateTests(unittest.TestCase):
+    """`scripts/git-branches.sh`: main published, staging merged, nothing forced.
+
+    This is the one implementation of the branch rule, and both the Linux
+    maintenance command and the Windows updater run it, so it is exercised against
+    real repositories: a bare origin, a checkout, and the states that matter -
+    unpublished work on `staging`, a moved `main`, a dirty tree, a checkout with no
+    `staging` at all, and a repointed remote.
+    """
+
+    def setUp(self):
+        if not shutil.which("git"):
+            self.skipTest("git is not installed")
+        self.tmp = Path(tempfile.mkdtemp(prefix="osint-branches-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        (self.tmp / "home").mkdir()
+        # A clean environment, and deliberately no Git identity: that is the state
+        # of an installed checkout, and the merge has to cope with it. The PATH is
+        # the system one, so a `git` shim on the developer's PATH (a policy
+        # wrapper, an alias) cannot decide what this test measures.
+        self.env = {
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(self.tmp / "home"),
+            "XDG_CONFIG_HOME": str(self.tmp / "home"),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "LANG": "C",
+        }
+        self.origin = self.tmp / "origin.git"
+        self.seed = self.tmp / "seed"
+        self.git("init", "--quiet", "--bare", "--initial-branch=main", str(self.origin))
+        self.git("init", "--quiet", "--initial-branch=main", str(self.seed))
+        (self.seed / "program.txt").write_text("one\n")
+        self.git("add", "program.txt", cwd=self.seed)
+        self.commit(self.seed, "released program")
+        self.git("remote", "add", "origin", str(self.origin), cwd=self.seed)
+        self.git("push", "--quiet", "origin", "main", cwd=self.seed)
+        self.git("checkout", "--quiet", "-b", "staging", cwd=self.seed)
+        # The development branch touches its own file, so that a later change to
+        # the published one merges instead of colliding with it.
+        (self.seed / "staging.txt").write_text("staging work\n")
+        self.git("add", "staging.txt", cwd=self.seed)
+        self.commit(self.seed, "staging work")
+        self.git("push", "--quiet", "origin", "staging", cwd=self.seed)
+
+    def git(self, *args, cwd=None):
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd or self.tmp),
+            env=self.env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def git_status(self, *args, cwd=None):
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd or self.tmp),
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).returncode
+
+    def commit(self, cwd, message):
+        self.git(
+            "-c", "user.name=fixture",
+            "-c", "user.email=fixture@example.com",
+            "-c", "commit.gpgsign=false",
+            "commit", "--quiet", "-m", message,
+            cwd=cwd,
+        )
+
+    def work_checkout(self, *clone_arguments):
+        """A checkout of the fixture's origin, on `main`, with `staging` local."""
+        work = self.tmp / f"work-{len(list(self.tmp.glob('work-*')))}"
+        self.git("clone", "--quiet", *clone_arguments, str(self.origin), str(work), cwd=self.tmp)
+        if not clone_arguments:
+            self.git("checkout", "--quiet", "staging", cwd=work)
+        return work
+
+    def publish_main(self, text):
+        """The maintainer merges into `main` and publishes it."""
+        self.git("checkout", "--quiet", "main", cwd=self.seed)
+        (self.seed / "program.txt").write_text(text)
+        self.git("add", "program.txt", cwd=self.seed)
+        self.commit(self.seed, f"publish {text.strip()}")
+        self.git("push", "--quiet", "origin", "main", cwd=self.seed)
+        self.git("checkout", "--quiet", "staging", cwd=self.seed)
+
+    def update(self, checkout, *arguments):
+        return subprocess.run(
+            ["/bin/bash", str(SCRIPTS / "git-branches.sh"), str(checkout), *arguments],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def branch(self, checkout):
+        return self.git("symbolic-ref", "--short", "HEAD", cwd=checkout).stdout.strip()
+
+    def head(self, checkout, branch="HEAD"):
+        return self.git("rev-parse", branch, cwd=checkout).stdout.strip()
+
+    def is_ancestor(self, ancestor, descendant, checkout):
+        return self.git_status("merge-base", "--is-ancestor", ancestor, descendant, cwd=checkout) == 0
+
+    def test_a_checkout_already_containing_main_says_so(self):
+        work = self.work_checkout()
+        result = self.update(work)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.branch(work), "staging")
+        self.assertIn("already contains main", result.stdout)
+        self.assertIn("main     up to date", result.stdout)
+
+    def test_unpublished_work_survives_the_merge_of_main(self):
+        work = self.work_checkout()
+        (work / "skill.txt").write_text("the user's own work\n")
+        self.git("add", "skill.txt", cwd=work)
+        self.commit(work, "unpublished skill")
+        unpublished = self.head(work)
+        self.publish_main("one\nreleased\n")
+        result = self.update(work)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The dance ends on staging, with the published main merged into it and
+        # the commit GitHub never saw still there.
+        self.assertEqual(self.branch(work), "staging")
+        self.assertEqual(self.head(work, "main"), self.head(work, "origin/main"))
+        self.assertTrue(self.is_ancestor("origin/main", "HEAD", work))
+        self.assertTrue(self.is_ancestor(unpublished, "HEAD", work))
+        self.assertEqual(self.git("status", "--porcelain", cwd=work).stdout, "")
+        # The checkout has no Git identity, so the merge commit says who made it.
+        author = self.git("log", "-1", "--format=%an <%ae>", cwd=work).stdout.strip()
+        self.assertEqual(author, "OSINT AI update <update@osint-ai.invalid>")
+        self.assertIn("merged main", result.stdout)
+
+    def test_a_dirty_checkout_is_refused_and_left_alone(self):
+        work = self.work_checkout()
+        self.publish_main("one\nreleased\n")
+        (work / "unsaved.txt").write_text("not saved yet\n")
+        before = self.head(work)
+        result = self.update(work)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("has changes Git has not saved yet", result.stderr)
+        self.assertIn("unsaved.txt", result.stderr)
+        self.assertEqual(self.branch(work), "staging")
+        self.assertEqual(self.head(work), before, "a refused update must change nothing")
+        self.assertEqual(self.head(work, "main"), self.head(work, "origin/main"))
+        self.assertTrue((work / "unsaved.txt").is_file())
+
+    def test_a_checkout_without_staging_only_fast_forwards_main(self):
+        work = self.work_checkout("--branch", "main", "--single-branch")
+        self.publish_main("one\nreleased\n")
+        result = self.update(work)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.branch(work), "main")
+        self.assertEqual(self.head(work), self.head(work, "origin/main"))
+        self.assertIn("not in this checkout", result.stdout)
+        self.assertNotEqual(
+            self.git_status("show-ref", "--verify", "--quiet", "refs/heads/staging", cwd=work), 0
+        )
+
+    def test_a_repointed_remote_is_refused(self):
+        work = self.work_checkout()
+        self.publish_main("one\nreleased\n")
+        before = self.head(work, "main")
+        result = self.update(work, "https://github.com/example/elsewhere.git")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("not from https://github.com/example/elsewhere.git", result.stderr)
+        # Nothing was fast-forwarded, not even after a fetch.
+        self.assertEqual(self.head(work, "main"), before)
+        self.assertNotEqual(self.head(work, "main"), self.head(self.seed, "main"))
+        # The same remote in another spelling is the same repository.
+        result = self.update(work, str(self.origin).removesuffix(".git") + "/")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_conflicting_merge_is_undone_and_reported(self):
+        """A conflict is the maintainer's call: never left half-merged.
+
+        The user would otherwise find a conflicted merge they never started, in a
+        checkout they publish from. The update reports it and puts the branch back
+        exactly as it was, with the assistant's work intact.
+        """
+        work = self.work_checkout()
+        (work / "program.txt").write_text("the assistant's version\n")
+        self.git("add", "program.txt", cwd=work)
+        self.commit(work, "unpublished change")
+        unpublished = self.head(work)
+        self.publish_main("the published version\n")
+        result = self.update(work)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("does not merge into staging", result.stderr)
+        self.assertIn("needs the maintainer", result.stderr)
+        self.assertIn("needs your attention", result.stdout)
+        self.assertEqual(self.branch(work), "staging")
+        self.assertEqual(self.head(work), unpublished)
+        self.assertNotEqual(
+            self.git_status("rev-parse", "--verify", "MERGE_HEAD", cwd=work), 0,
+            "a refused merge must not be left behind",
+        )
+
+    def test_an_unexpected_branch_is_refused(self):
+        work = self.work_checkout()
+        self.git("checkout", "--quiet", "-b", "experiment", cwd=work)
+        result = self.update(work)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("only handles main and staging", result.stderr)
+        self.assertEqual(self.branch(work), "experiment")
 
 
 class ServerTests(unittest.TestCase):

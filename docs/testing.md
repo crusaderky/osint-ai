@@ -4,10 +4,13 @@ This layout is incompatible with installations made before the move to `scripts/
 and `windows/`, and with the ones made before the agent's checkout was mounted
 whole at `/osint-ai`: those PCs still have the old root-owned copies in
 `/usr/local/lib/osint-ai`, and the launcher prefers an installed copy over the
-checkout copy, so `update-project` alone does not change the sandbox. Reinstall
-the private WSL distribution (`wsl --unregister osint-ai`, then run
-`windows\Install.cmd` again). The Windows checkout and its `workspace/` content
-are not touched by the installer. The agent home moved to
+checkout copy. Reinstall the private WSL distribution (`wsl --unregister osint-ai`,
+then run `windows\Install.cmd` again) for that. **Update OSINT AI** refreshes those
+copies from the Linux checkout on every later click, and a rerun of `Install.cmd`
+refreshes them from the checkout being installed, so a change to `scripts/` reaches
+an installed PC without a reinstall - which is new, and worth checking on a real
+PC. The Windows checkout and its `workspace/` content are not touched by the
+installer. The agent home moved to
 `~/.local/state/osint-ai/agent-home` in both deployments, so an old
 `/var/lib/osint-ai/agent-home` is simply unused; unregistering the distro deletes
 it, and `/login` has to be run again afterwards. Model weights moved out of the
@@ -34,7 +37,11 @@ the environment), actual bubblewrap filesystem isolation, Git inside the sandbox
 (that `git status` works from Pi's own directory, and that a commit from
 inside succeeds, which is the documented consequence of a writable `.git`),
 CPU-versus-GPU backend selection and server process ownership/lifecycle with a
-fake local server. Integration tests explicitly skip when namespaces are blocked.
+fake local server. The branch rule is exercised against real repositories built on
+the spot: unpublished work survives the merge of `main` into `staging`, a dirty
+checkout, an unexpected branch and a repointed remote are refused with nothing
+changed, and a conflicting merge is undone instead of left half-applied.
+Integration tests explicitly skip when namespaces are blocked.
 A green run on a machine that skips them proves nothing about bubblewrap; say so.
 
 README checks cover the essential commands and workspace paths, and verify that
@@ -209,6 +216,18 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       prints, and stops it. After that, a local model answers in the assistant
       without any further setup, and `pixi r update-project` inside WSL does not
       disturb it.
+- [ ] **Update OSINT AI** on a PC that was installed from an older revision: the
+      window reports the branch work, `/usr/local/lib/osint-ai` is refreshed from
+      the Linux checkout (compare `ls -l` timestamps and the installed
+      `git-branches.sh`), the Windows checkout ends on `staging` with `main` merged
+      into it, and the native llama.cpp environment is reinstalled from the updated
+      manifest. A left-over local model is stopped first, and clicking **Start
+      llama.cpp** brings it back. Then the same icon with the Windows checkout
+      dirty, on another branch or pointed at a different remote: it refuses, says
+      why, changes nothing, and still leaves the model server build consistent.
+      Running the WSL half by hand from PowerShell
+      (`wsl -d osint-ai -u root -e /bin/bash /usr/local/lib/osint-ai/update-installation.sh`)
+      does the same work, and refuses to run as anything but root.
 - [ ] The firewall rule exists once, is named `OSINT AI local inference`, is bound
       to the WSL adapter and the local subnet, and rerunning the installer reuses it
       without a new prompt. Declining that prompt leaves online models working and
@@ -306,8 +325,11 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       checkout as the current user, `pixi r update-project` updates it together
       with the assistant's environment, `stop-server` installs nothing, and
       `pixi r install` reports its absence without calling it MISSING.
-- [ ] `pixi r update-project` updates a WSL installation and the next chatbot
-      start uses the new tools; a diverged Linux checkout is refused.
+- [ ] `pixi r update-project` on a WSL installation fast-forwards the Linux
+      checkout's `main` and installs its environments; the next chatbot start uses
+      the new tools. On plain Linux it ends on `staging` with `main` merged in, and
+      refuses an uncommitted checkout without touching it. A diverged `main` or
+      `staging` is reported as needing attention rather than resolved.
 - [ ] README uninstall steps work in order on a used installation: unregistered
       distro, `%LOCALAPPDATA\osint-ai` gone (including the native Pixi and the
       Windows inference environment), `%USERPROFILE%\.cache\huggingface` gone,
@@ -317,7 +339,8 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
 
 ## Release gates still outside skeleton
 
-Signed Windows installer, published immutable release, full supply-chain lock and
-update process, download/disk-space UX, installer rollback/uninstall, automated
-Windows VM tests, supported GPU/driver matrix, security review, resource quotas,
-and model presets appropriate for supported consumer hardware.
+Signed Windows installer, published immutable release, full supply-chain lock and a
+rollback-capable update process (the Update OSINT AI icon updates in place and
+does not roll back), download/disk-space UX, installer rollback/uninstall,
+automated Windows VM tests, supported GPU/driver matrix, security review, resource
+quotas, and model presets appropriate for supported consumer hardware.

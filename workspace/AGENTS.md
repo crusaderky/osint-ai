@@ -164,6 +164,12 @@ it is not loaded into your context and you must ignore it.
 `pixi add`, `pip install` and `apt-get` are not available to you. Tools come
 from the project environment and are already on `PATH`.
 
+The program is updated by the user, not by you: on Windows they double-click the
+**Update OSINT AI** desktop icon, and on Linux the maintainer runs
+`pixi r update-project` in the project folder. If the user asks for a newer
+version, say that - and that local models have to be started again afterwards,
+because an update stops the model server to replace its build.
+
 If something is missing, say plainly what is missing and ask the user to forward the
 request to the developer of the project root checkout. Write the exact command they
 need, for example `pixi add <package>` or `pixi add --pypi <package>`.

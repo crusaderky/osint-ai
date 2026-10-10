@@ -215,8 +215,8 @@ is guidance only.
   WSL-user privileges, or normal Windows-user privileges for the natively running
   model server. `pixi r install` - including its AppArmor step, one of the few
   places the project asks for a password - `pixi r update-project`, the Windows
-  installer and the **Start llama.cpp** / **Stop llama.cpp** desktop icons are
-  trusted human operations, not startup paths and never agent
+  installer and the **Start llama.cpp** / **Stop llama.cpp** / **Update OSINT AI**
+  desktop icons are trusted human operations, not startup paths and never agent
   tools. Both install scripts refuse to run when `OSINT_SANDBOX=1`, and the icons
   run `pixi run --locked` so a manifest that drifted from `pixi.lock` fails instead
   of installing something else.
@@ -278,4 +278,43 @@ containment: `scripts/server.py` refuses when `OSINT_SANDBOX=1` and must keep
 refusing. Do not add passwordless
 sudo of a project script, do not load commands from the writable Windows checkout
 into `/etc/wsl.conf`, and do not point the boot helper at anything but
-`/etc/osint-ai.json`. Existing installations are not silently upgraded.
+`/etc/osint-ai.json`. Nothing updates an installed PC silently: the two update
+paths are a human clicking **Update OSINT AI** on Windows and a human running
+`pixi r update-project` on Linux.
+
+### What the Update OSINT AI icon may do
+
+The root-owned runtime under `/usr/local` is installed once outside both
+checkouts, so an installed PC runs the code it installed rather than whatever a
+checkout contains. The corollary is that a change to `scripts/` only reaches that
+PC when something reinstalls those files, and the Update OSINT AI icon is that
+something. It is the one root-capable path an installed PC has besides the
+installer, so its rules are explicit:
+
+- It is started by the desktop icon and nothing else: not by start-up, not by the
+  WSL boot hook, never by the agent. Both its WSL half and `install-runtime.sh`
+  refuse when `OSINT_SANDBOX=1`, and its WSL half refuses to run outside a
+  distribution the installer marked installed.
+- It installs `/usr/local` from the **Linux program checkout**, after fast-forwarding
+  that checkout's `main` to the published one. The sandbox mounts that checkout
+  read-only and the agent cannot write it, so the agent cannot aim the refresh at
+  code of its own. The first installation and a rerun of `Install.cmd` install the
+  same files from the checkout the human chose to install, which is the trust
+  provisioning already had - a fresh clone, before the agent has ever run - and a
+  rerun prefers the Linux checkout for that same reason when it already carries the
+  installer.
+- It uses root for `/usr/local` and for mounting the Windows drive, and nothing
+  else. Every Git command and every Pixi install runs as `osint`, the owner of both
+  checkouts: the Windows checkout is writable by the agent, `.git` included, and Git
+  runs whatever hooks it finds there. Those Git commands also switch hooks and the
+  fsmonitor off, and they pin the Windows checkout's origin to the Linux checkout's
+  origin, which the installer verified and the agent cannot write - a repointed
+  remote is refused instead of followed.
+- It refuses a checkout with unsaved changes, a checkout on any branch other than
+  `main` or `staging`, and a checkout whose origin does not match, leaving it
+  exactly as it was. It never pushes, discards a commit, rebases, or resolves a
+  conflict; a merge that would conflict is undone and reported.
+- The Windows half of the update runs the same `pixi run --locked` task the Start
+  llama.cpp icon runs, in the Windows checkout's own environment, and that remains
+  the documented exception: the native model server, and this update of it, run
+  what the human's checkout says.

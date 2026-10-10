@@ -39,6 +39,7 @@ It creates these desktop shortcuts:
 | **OSINT AI Terminal** | Open the assistant. Use this for everyday work. |
 | **Start llama.cpp** | Start the local model server, so the assistant can use models that run on this PC. |
 | **Stop llama.cpp** | Stop it again when you are finished; it also stops when you restart the PC. |
+| **Update OSINT AI** | Get the newest version of the program, then update the local model server. |
 | **OSINT AI Files** | Open the project folder in File Explorer. Your research is in `workspace`. |
 | **OSINT AI Terminal (basic)** | Open an alternative chat window if the main one has problems. |
 
@@ -263,10 +264,15 @@ before sharing it. Never put passwords, API keys or personal data in a skill.
 | A local model is not in the list, or will not load | Double-click **Start llama.cpp** and try again. If that window shows an error, share it with your maintainer. |
 | A file seems to be missing | Check `workspace` in File Explorer, then GitHub Desktop → **History**. |
 
-Pulling team files does not update the installed program. For program changes,
-ask your maintainer to update the project root checkout and run `update-project`
-on the WSL side (Windows' Linux system). Some changes require reinstalling;
-see the [maintenance guide](docs/development.md).
+Pulling team files does not update the installed program. When your maintainer
+says a new version is ready, double-click **Update OSINT AI** and read the window
+it opens: it fetches the newest program, refreshes the parts installed outside
+your project folder, and rebuilds the local model server. Local models are
+stopped by that update, so click **Start llama.cpp** again when you want them.
+A PC installed before this icon existed has no such shortcut: run
+**`windows\Install.cmd`** once to add it. On Linux the same job is
+`pixi r update-project` in the project folder. A few changes still need a
+reinstall; see the [maintenance guide](docs/development.md).
 
 ## Uninstall
 

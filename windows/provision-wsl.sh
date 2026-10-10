@@ -34,17 +34,12 @@ fi
 [[ $(id -u osint) == 1000 ]] || { echo 'Unexpected osint UID.' >&2; exit 1; }
 
 install -d -m 755 /usr/local/lib/osint-ai /var/lib/osint-ai
-# The launcher, entry script and server controller are the same files the Linux
-# deployment runs from scripts/. mount-workspace.py is the one part here that
-# only makes sense in WSL.
-for file in bwrap-pi.sh install-apparmor.sh install-check.sh pi-entry.sh \
-    sandbox.py server.py update-project.sh; do
-    install -m 755 "$REPO/scripts/$file" "/usr/local/lib/osint-ai/$file"
-done
-install -m 755 "$HERE/mount-workspace.py" /usr/local/lib/osint-ai/mount-workspace.py
-for command in osint-pi osint-pi-wsl osint-terminal start-server stop-server restart-server update-project; do
-    install -m 755 "$HERE/launchers/$command" "/usr/local/bin/$command"
-done
+# The root-owned runtime: the sandbox launcher, the pi entry script, the server
+# controller, the boot mount helper, the updater and the terminal commands, from
+# `scripts/` and `windows/`. One list, in windows/install-runtime.sh, because
+# every later run of Install.cmd and every click of the Update OSINT AI icon
+# installs the same set from the same place.
+/bin/bash "$HERE/install-runtime.sh" "$REPO"
 # Inference state only. The assistant's own state is not pre-created here: it
 # lives in the osint user's ~/.local/state/osint-ai, exactly as on plain Linux,
 # and scripts/sandbox.py creates it at 0700 on the first launch. Model weights are
