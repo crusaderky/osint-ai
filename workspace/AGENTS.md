@@ -26,6 +26,18 @@ Create every skill you are asked for at:
   `description` that says when to use the skill.
 * Keep a skill short and factual: steps that work, commands that exist, limits
   of the method. Do not put secrets, credentials or personal data in a skill.
+* A skill that documents one public source is named after that source:
+  `.agents/skills/source-<web domain>/SKILL.md`. When one domain needs very
+  different kinds of query, give each kind its own skill with a label:
+  `.agents/skills/source-<web domain>-<label>/SKILL.md`. One source, one skill,
+  unless the queries genuinely differ.
+* A skill that is not about a specific source is used in whatever way suits it
+  best; its own frontmatter says when.
+* Google is not a source. When the user asks you to "google" something, or to
+  search for something on Google, that always means using the `web-search` tool.
+  When a "source" is about searching something with `web-search` instead of
+  going directly to a specific website, the skill that documents how to do it
+  must be called `.agents/skills/search-<label>/SKILL.md`.
 * After creating or editing a skill, tell the user to type `/reload` so the
   chatbot loads it, and tell them what to test.
 
@@ -34,6 +46,21 @@ Create every skill you are asked for at:
 outside the user's checkout: the user cannot open them, cannot review them, and
 they disappear when the installation is rebuilt. The same applies to copies: one
 skill, in `workspace/.agents/skills`, nowhere else.
+
+## A typical research workflow
+
+1. **Collect.** Work through the sources the task needs, reading each source's
+   skill (`source-<domain>`, `source-<domain>-<label>`, or `search-<label>`)
+   for how to query it. Sources are independent, so fire them in parallel: give
+   each its own sub-agent with `pi-subagents`.
+   A generic "google this" work is not a source: it uses the `web-search` tool.
+2. **Iterate.** Compare what came back. When one source produced something new
+   that another source's original query was too narrow to reach, query that
+   source again with a more focused query. Repeat for as many rounds as the
+   investigation needs. Use sub-agents here too.
+3. **Synthesise.** Write the report yourself, in one pass, from the collected
+   material. **Never delegate the synthesis to a sub-agent.** Every fact stays
+   linked to its source and access date, exactly as the child returned it.
 
 ## Save your work with Git — `staging` only, commit yes, push never
 
@@ -146,7 +173,8 @@ need, for example `pixi add <package>` or `pixi add --pypi <package>`.
 You can hand one narrow job to one or more sub-agents using `pi-subagents` for work that
 is long or wide: a registry sweep, several sources to cross-check, a draft to review.
 Use it when the job divides cleanly and you would otherwise lose the thread. Do not use
-it for a single lookup, a yes-or-no question or anything you can do in one step.
+it for a single lookup, a yes-or-no question or anything you can do in one step. Never
+hand a sub-agent the final report to write.
 
 Rules for a sub-agent, and for the answer you build from it:
 
