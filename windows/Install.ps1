@@ -343,6 +343,52 @@ try {
     $linuxLiteral = ConvertTo-ShellLiteral $LinuxProjectPath
     $script = @'
 set -euo pipefail
+
+# Git for the checkout the user and the assistant work in. The assistant may
+# write only on the one development branch, `staging`, so every run of this
+# installer leaves that checkout on `staging`, up to date with origin, without
+# touching anything unpublished.
+windows_git=(git -c safe.directory=/mnt/osint-ai -C /mnt/osint-ai)
+sync_staging() {
+    if [[ ! -d /mnt/osint-ai/.git || -L /mnt/osint-ai/.git ]]; then
+        echo 'No Git checkout is mounted; the staging branch was not checked out.' >&2
+        return 1
+    fi
+    origin=$("${windows_git[@]}" remote get-url origin)
+    [[ "$origin" == "$REPOSITORY" ]] || {
+        echo 'Existing checkout has a different origin; refusing to overwrite it.' >&2
+        return 1
+    }
+    # `clone --branch` fetches one branch only, which would also hide `staging`
+    # from the assistant's own `git fetch`. Ask for every branch, on every run.
+    "${windows_git[@]}" remote set-branches origin '*' || return 1
+    if ! GIT_TERMINAL_PROMPT=0 "${windows_git[@]}" fetch --quiet --prune origin; then
+        "${windows_git[@]}" show-ref --verify --quiet refs/heads/staging || {
+            echo 'Could not reach origin and this checkout has no staging branch. Check your network, or fetch the staging branch in your Git app, then rerun Install.cmd.' >&2
+            return 1
+        }
+        echo 'Could not reach origin; using the staging branch already in this checkout.' >&2
+    fi
+    if "${windows_git[@]}" show-ref --verify --quiet refs/heads/staging; then
+        "${windows_git[@]}" checkout --quiet staging || {
+            echo 'Uncommitted changes block switching to the staging branch. Commit them in your Git app, then rerun Install.cmd.' >&2
+            return 1
+        }
+    else
+        "${windows_git[@]}" checkout --quiet -b staging origin/staging || {
+            echo 'The repository has no staging branch yet. Ask the maintainer to publish it, then rerun Install.cmd.' >&2
+            return 1
+        }
+    fi
+    if [[ -n $("${windows_git[@]}" status --porcelain) ]]; then
+        echo 'Uncommitted changes are kept; the staging branch was left as it is.'
+    else
+        "${windows_git[@]}" merge --ff-only origin/staging ||
+            echo 'Your staging branch and the one on GitHub have both moved on; push or merge them in your Git app.' >&2
+    fi
+    return 0
+}
+
 if [[ -f /etc/osint-ai-installed ]]; then
     /usr/bin/python3 -I - "$WINDOWS_PROJECT" <<'PY'
 import json, sys
@@ -352,6 +398,7 @@ if config['windows_project'] != sys.argv[1]:
     sys.exit('This distro belongs to another project folder; refusing to reconfigure it.')
 PY
     /usr/local/lib/osint-ai/mount-workspace.py
+    sync_staging || exit 1
     echo 'Already installed. Existing checkouts, credentials, and environments were preserved.'
     exit 0
 fi
@@ -390,15 +437,16 @@ if ! mountpoint -q /mnt/osint-ai; then
     trap - EXIT
 fi
 if [[ -d /mnt/osint-ai/.git && ! -L /mnt/osint-ai/.git ]]; then
-    origin=$(git -c safe.directory=/mnt/osint-ai -C /mnt/osint-ai remote get-url origin)
-    [[ "$origin" == "$REPOSITORY" ]] || { echo 'Existing checkout has a different origin; refusing to overwrite it.' >&2; exit 1; }
-    echo 'Using the existing Windows checkout without pulling or discarding changes.'
+    echo 'Using the existing Windows checkout.'
 elif [[ -z $(find /mnt/osint-ai -mindepth 1 -maxdepth 1 -print -quit) ]]; then
     GIT_TERMINAL_PROMPT=0 git -c core.autocrlf=false clone --config core.filemode=false --branch "$REF" -- "$REPOSITORY" /mnt/osint-ai
 else
     echo 'Project folder is not empty and is not the expected Git checkout. Choose an empty folder.' >&2
     exit 1
 fi
+# The assistant must never commit to `main`, so the checkout is put on `staging`
+# before provisioning reads anything out of it, and before the agent can start.
+sync_staging || exit 1
 exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOSITORY" "$REF" "$LINUX_PROJECT"
 '@
     # Prefix escaped assignments once; never run chained replacements over user input.

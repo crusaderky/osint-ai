@@ -598,6 +598,32 @@ class ConfigurationTests(unittest.TestCase):
         launcher = (SCRIPTS / "sandbox.py").read_text()
         self.assertIn('"CONDA_PREFIX": str(env_prefix)', launcher)
 
+    def test_the_workspace_guide_keeps_the_agent_on_staging(self):
+        """One development branch, checked before the agent touches anything.
+
+        The agent commits in the checkout the user publishes from, so it must
+        never write to `main`. Guidance lets it switch `main` -> `staging` and
+        merge the published `main` back into `staging`, and nothing else.
+        """
+        guide = (ROOT / "workspace/AGENTS.md").read_text()
+        for needle in (
+            "git status --porcelain=v1 -b",
+            "git checkout staging",
+            "git fetch origin",
+            "git rev-list --count staging..origin/main",
+            "git merge origin/main",
+            "git merge --abort",
+        ):
+            self.assertIn(needle, guide, needle)
+        # A conflict is the maintainer's call, never the agent's, and the agent
+        # never publishes the development branch.
+        self.assertIn("do not resolve it", guide)
+        self.assertIn("Never merge `staging` into `main`", guide)
+        self.assertIn("`git push`, or ask for GitHub credentials", guide)
+        # The old blanket ban on branch switching would forbid the required
+        # switch, so it must not come back as the only rule.
+        self.assertNotIn("`git checkout <branch>`", guide)
+
     def test_no_document_or_skill_keeps_the_old_workspace_mount(self):
         """`/workspace` no longer exists in the sandbox; nothing may name it.
 
@@ -817,6 +843,16 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("--unregister", script)
         self.assertNotIn("reset --hard", script)
         self.assertNotIn("git pull", script)
+        # The checkout the assistant commits from is put on the one development
+        # branch, and only ever fast-forwarded: unpublished work survives, and a
+        # divergence is reported instead of resolved.
+        self.assertIn("remote set-branches origin '*'", script)
+        self.assertIn("checkout --quiet staging", script)
+        self.assertIn("checkout --quiet -b staging origin/staging", script)
+        self.assertIn("merge --ff-only origin/staging", script)
+        self.assertNotIn("checkout main", script)
+        self.assertNotIn("git switch", script)
+        self.assertEqual(script.count("sync_staging || exit 1"), 2, "every path must sync")
         self.assertIn("--no-distribution", script)
         self.assertIn("Get-FileHash", script)
         self.assertIn("Restart Windows", script)

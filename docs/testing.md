@@ -230,9 +230,11 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       directory, reports the Windows checkout and matches GitHub Desktop for
       clean, modified, untracked and ahead-of-remote cases, and the assistant's
       reminder wording is right. `which awk` and `awk --version` work inside the
-      session. Confirm by hand that the assistant commits when asked, and that it
-      does not push, switch branches, rebase or discard anything on its own; treat
-      any behaviour to the contrary as a bug.
+      session. Confirm by hand that the assistant commits when asked, starts on
+      `staging` (switching from `main` when the checkout is there), merges `main`
+      into `staging` when `main` has moved on, and never pushes, leaves `staging`,
+      rebases or discards anything on its own; treat any behaviour to the
+      contrary as a bug.
 - [ ] New skill lands in `workspace\.agents\skills\<name>\SKILL.md`; Notepad
       sees it immediately and
       `/reload` + `/skill:<name>` find it. `workspace\AGENTS.md` is loaded and

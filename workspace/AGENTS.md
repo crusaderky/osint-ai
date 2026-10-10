@@ -35,19 +35,57 @@ outside the user's checkout: the user cannot open them, cannot review them, and
 they disappear when the installation is rebuilt. The same applies to copies: one
 skill, in `workspace/.agents/skills`, nowhere else.
 
-## Save your work with Git — commit yes, push never
+## Save your work with Git — `staging` only, commit yes, push never
 
 You work in a real Git checkout, and `git status` works from your working
 directory: `/osint-ai/workspace` sits inside `/osint-ai`, which holds `.git`.
-Run it yourself — at the start of a session, again after you create or change
-files, and whenever you finish a unit of work.
+Run it yourself — first thing at the start of a session, again after you create
+or change files, and whenever you finish a unit of work.
+
+### Always work on `staging`, never on `main`
+
+There is exactly one development branch, `staging`. `main` is the
+published version and belongs to the maintainer: never commit, merge or edit
+anything while the checkout is on `main`.
+
+Start every session by putting the checkout on `staging`:
+
+```bash
+git status --porcelain=v1 -b | head -1     # the first line names the branch
+git checkout staging                       # only when it starts "## main"
+```
+
+* `## main...` — run `git checkout staging`, then `git status` again.
+* `## staging...` — you are where you must be. Do not switch to any other
+  branch.
+* Any other branch, or a switch that fails — stop, say what happened in plain
+  words, and ask the user to show the message to the maintainer. Do not invent
+  a branch, do not keep working on `main`, and do not work around the failure.
+
+Then bring the published version into `staging` when `main` has moved on:
+
+```bash
+git fetch origin                             # reads GitHub; writes no file
+git rev-list --count staging..origin/main    # 0 means nothing new to merge
+git merge origin/main                        # only when the count is not 0
+```
+
+* If `git fetch origin` or the `rev-list` count fails, say so plainly and get on
+  with the user's work: no network — or no `main` to compare with — is not a
+  reason to stop.
+* If `git merge origin/main` reports a conflict, do not resolve it, do not
+  commit, and do not pick a side: run `git merge --abort` to put the checkout
+  back, then tell the user the merge needs the maintainer.
+* Never merge `staging` into `main`; the maintainer does that.
 
 You may:
 
 * `git status`, `git log`, `git diff` — to see what is saved and what is not.
-* `git add` and `git commit` — to save a finished unit of work, with a clear
-  one-line message such as `skill: add sanctions screening`. Say plainly what
-  you committed and which files.
+* `git add` and `git commit` — to save a finished unit of work on `staging`,
+  with a clear one-line message such as `skill: add sanctions screening`. Say
+  plainly what you committed and which files.
+* `git checkout staging` from `main`, `git fetch origin`, `git merge
+  origin/main` and `git merge --abort` — exactly as above, and nothing else.
 
 Your commits already have an author: the sandbox sets the name and email, so
 `git commit` works as it is. Do not change Git's identity settings; the user
@@ -60,21 +98,28 @@ the same file — do not copy that into a `git add`.
 
 You must never:
 
-* `git push`, or ask for GitHub credentials. Publishing is the user's move, made
-  in GitHub Desktop on Windows or with `git push` on Linux.
-* `git reset --hard`, `git checkout <branch>`, `git switch`, `git stash`, a
-  rebase, a force push, or anything that discards or rewrites the user's work.
-* Create a Git worktree or a new branch.
+* `git push`, or ask for GitHub credentials. Publishing `staging` is the user's
+  move, made in GitHub Desktop on Windows or with `git push` on Linux.
+* `git checkout main`, `git switch`, `git checkout -- <path>`, `git reset`,
+  `git stash`, a rebase, a force push, a worktree, or anything that discards or
+  rewrites the user's work. `git merge --abort` is only for the conflict above,
+  and only right after you report it.
+* Create a new branch, or resolve a conflict by guessing.
 
 Interpret `git status` like this:
 
-* The first `##` line is the branch. `[ahead N]` means commits exist that GitHub
-  has not received: say **“Please open GitHub Desktop and press Push.”**
+* The first `##` line is the branch. It must say `staging` while you work; check
+  it before you touch anything, as described above.
+* `[ahead N]` means commits exist that GitHub has not received: say **“Please
+  open GitHub Desktop and press Push.”**
 * ` M ` or `M ` lines are changed files, `?? ` lines are new files: say **“You
   have changes that Git has not saved yet.”** Then offer to commit them, or do it
   if the user asked.
 * `[behind N]` means the team published new work: say **“Please press Pull
   first, then type `/reload`.”**
+* `[diverged]` means both sides have commits: say **“Your work and GitHub's have
+  both changed; please ask the maintainer before continuing.”** Do not merge or
+  discard either side.
 
 Always remind after you touch `AGENTS.md` or any skill. If `git status` fails,
 say so in plain words and remind anyway. The user reviews what you committed;
@@ -111,9 +156,10 @@ Rules for a sub-agent, and for the answer you build from it:
 * The child works in the same sandbox, the same model and the same rules as you.
   It sees the same `/osint-ai` checkout, and on Windows the read-only program at
   `/opt/osint-ai/project`. It writes only where you may write.
-* The child must never push, switch branches or discard work, and must not create
-  a Git worktree; do not ask it to. Do not ask a child for a decision the user
-  has to make: ask the user.
+* Put yourself on `staging` before you start a child: the child inherits the
+  branch you are on. The child must never push, change branches or discard work,
+  and must not create a Git worktree; do not ask it to. Do not ask a child for
+  a decision the user has to make: ask the user.
 * Report the child's work in your own words, keep the user's confidence labels,
   and list what nobody could verify. Never present a child's guess as a finding.
 

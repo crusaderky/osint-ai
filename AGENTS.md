@@ -44,8 +44,9 @@ On Windows the repository exists twice, by design:
 * `C:\Users\<name>\osint-ai`, mounted at `/mnt/osint-ai` — Windows checkout. The
   user edits `workspace/` there and publishes with a Windows Git GUI. Mounted
   whole and read-write in the sandbox at `/osint-ai`, `.git` included, so the
-  assistant can run `git status` and commit there itself; it is told never to
-  push or discard work.
+  assistant can run `git status` and commit there itself. `staging` is the only
+  development branch: the installer checks it out, the assistant is told to work
+  on it and never on `main`, and it never pushes or discards work.
 
 `bwrap-pi.sh --wsl` binds the Linux checkout **read-only** at
 `/opt/osint-ai/project` and the Windows checkout **read-write** at `/osint-ai`,
@@ -183,11 +184,12 @@ dependencies; it must ask instead.
   before clicking a desktop icon that runs it. Keep `--locked` on those pixi
   commands so a manifest that does not match the lock fails instead of quietly
   installing something else. The agent's own
-  checkout is writable on purpose, `.git` included; guidance lets it commit and
-  forbids it from publishing, and the human reviews every change. The assistant's
-  instructions are `workspace/AGENTS.md` and nothing else: the package ships no
-  copy of it, `~/.pi/agent/AGENTS.md` is not mounted into the agent home, and
-  `scripts/pi-entry.sh` starts Pi with `--no-context-files` plus
+  checkout is writable on purpose, `.git` included; guidance keeps it on
+  `staging` (it may switch `main` -> `staging` and merge `main` into `staging`)
+  and forbids it from publishing, and the human reviews every change. The
+  assistant's instructions are `workspace/AGENTS.md` and nothing else: the
+  package ships no copy of it, `~/.pi/agent/AGENTS.md` is not mounted into the
+  agent home, and `scripts/pi-entry.sh` starts Pi with `--no-context-files` plus
   `--append-system-prompt /osint-ai/workspace/AGENTS.md`. Pi loads a context file
   from its working directory *and from every parent directory*, and Pi 1.0.2 has
   no setting to limit that walk, so this file - which sits directly above the

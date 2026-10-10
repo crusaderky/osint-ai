@@ -171,9 +171,12 @@ maintainer for help.
 | To share that version | Review the commits waiting to be uploaded, then click **Push origin**. This uploads all pending commits, not just selected files. |
 | To see earlier versions | Open **History**. |
 
-The assistant can make a commit when you ask. It is instructed not to push,
-ask for your GitHub credentials or discard work. Review its changes yourself;
-these instructions are not a substitute for backups.
+The assistant works on a branch called **staging**, never on the published
+version. Leave the branch shown in GitHub Desktop alone: your maintainer merges
+**staging** into the published version. The assistant can make a commit when you
+ask. It is instructed not to push, ask for your GitHub credentials or discard
+work. Review its changes yourself; these instructions are not a substitute for
+backups.
 
 On Linux, use a Git app or run `git add`, `git commit`, `git pull` and `git push`
 in the project folder. The assistant can commit; you handle uploading.

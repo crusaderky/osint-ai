@@ -122,8 +122,10 @@ is guidance only.
    `scripts/pi-entry.sh` does the same for `~/.pi` and `~/.pi/agent`.
 5. The agent runs Git itself, in a real and writable repository, by deliberate
    maintainer decision. `workspace/AGENTS.md` lets it run `git status`, `git add`
-   and `git commit`, and forbids it to push, switch branches, rebase, reset or
-   discard work, so the user still publishes in the Windows GUI. That is
+   and `git commit`, puts it on the one development branch `staging` (it may
+   switch `main` -> `staging` and merge `main` into `staging`) and forbids it to
+   push, switch to any other branch, rebase, reset or discard work, so the user
+   still publishes in the Windows GUI. That is
    guidance, not enforcement: the sandbox permits a `reset --hard` of the user's
    uncommitted work, a history rewrite, or a push if WSL ever held a credential.
    The installer never imports GitHub Desktop's credentials, so a push is

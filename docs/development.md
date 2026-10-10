@@ -94,9 +94,14 @@ GPU. Installation uses several GB for packages; model weights download separatel
 on first use.
 
 Distribute the `windows/` folder (`Install.cmd` and `Install.ps1` together). The
-bootstrap defaults to `https://github.com/crusaderky/osint-ai.git`, branch
-`main`. Publish the repository and installer before directing users at them, and
-pin a reviewed release tag rather than relying on a mutable branch.
+bootstrap defaults to `https://github.com/crusaderky/osint-ai.git` and `-Ref
+main` for the Linux runtime checkout. The Windows checkout is always put on
+`staging` instead, because that is the branch the assistant works on, and
+provisioning and the native llama.cpp environment are built from it. Merge
+`staging` into `main` and distribute the installer from that merge, so a new
+installation provisions the reviewed release; pinning `-Ref` to a release tag is
+not enough on its own while the two branches differ. Publish the repository and
+installer before directing users at them.
 
 Developer overrides, from PowerShell inside the `windows` folder:
 
@@ -106,15 +111,16 @@ Developer overrides, from PowerShell inside the `windows` folder:
 ```
 
 The bootstrap expects a public repository. For a private one, clone it first with
-a Windows Git GUI, then supply the matching URL and checkout path. GitHub
-credentials are not copied into the agent sandbox.
+a Windows Git GUI, fetch its `staging` branch there too, then supply the matching
+URL and checkout path. GitHub credentials are not copied into the agent sandbox.
 
 The installer:
 
 - Creates a dedicated `osint-ai` WSL distribution, leaving existing
   distributions unchanged, plus the Windows checkout.
 - Verifies pinned Ubuntu and Pixi downloads and never resets an existing
-  checkout; it does not pull, discard or delete user content.
+  checkout: it puts the Windows checkout on `staging` and fast-forwards only that
+  branch, and does not discard or delete user content.
 - Clones the Linux checkout and installs the `default` environment inside it.
 - Runs `windows/provision-wsl.sh`, which installs the root-owned launchers, the
   boot mount helper, and the AppArmor profile for the bubblewrap the Linux
@@ -258,9 +264,10 @@ outside the sandbox.
 | `/var/lib/osint-ai/server-state/`, `%LOCALAPPDATA%\osint-ai\server-state\` | Inference server log and pid file (the WSL deployment pre-creates the first; the native Windows server owns the second) |
 
 Inside the sandbox the agent works in a real Git checkout: it can read the whole
-history and, with `.git` writable, commit or discard work. Guidance lets it
-commit and forbids pushing, branch switching and discarding, and the user reviews
-the result. It never sees the Windows drive root, other drives, host homes, WSL
+history and, with `.git` writable, commit or discard work. Guidance puts it on
+`staging`, lets it switch `main` -> `staging` and merge `main` into `staging`,
+and forbids pushing, other branch switches and discarding; the user reviews the
+result. It never sees the Windows drive root, other drives, host homes, WSL
 interop sockets or GPU devices, and in WSL it never sees the Linux checkout's own
 repository or the host path `/mnt/osint-ai`. Networking stays enabled.
 
@@ -351,8 +358,10 @@ omits tools such as pandoc and poppler.
 Commit `pixi.toml` and `pixi.lock` together, then have each WSL installation run
 `update-project`. Users review and publish with a Windows Git GUI. The chatbot
 runs Git in its own checkout: it reads status, and it may `git add` and
-`git commit` a finished unit of work, but its guidance forbids pushing, branch
-switching and discarding work, and the user reviews every change. It has no
+`git commit` a finished unit of work, but its guidance keeps it on `staging` - it
+may switch `main` -> `staging` and merge `main` into `staging` - and forbids
+pushing, other branch switches and discarding work; the user reviews every
+change. It has no
 access to the Linux checkout's repository. The launcher gives those commits an
 author (`OSINT AI assistant <assistant@osint-ai.invalid>`, set as
 `GIT_AUTHOR_*` and `GIT_COMMITTER_*`), because the agent home has no
