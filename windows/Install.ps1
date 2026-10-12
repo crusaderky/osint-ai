@@ -402,7 +402,10 @@ set -euo pipefail
 # installation runs - provisioning, the runtime, the guided sandbox - is read out
 # of that checkout, so it must be installed from after the last publish and not
 # from before it.
-windows_git=(git -c safe.directory=/mnt/osint-ai -C /mnt/osint-ai)
+# Hooks, the fsmonitor command and the pager all come from a `.git` the
+# assistant can write in this deployment; switch them off, as the branch
+# helper does.
+windows_git=(git -c safe.directory=/mnt/osint-ai -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.pager=cat -C /mnt/osint-ai)
 sync_branches() {
     if [[ ! -d /mnt/osint-ai/.git || -L /mnt/osint-ai/.git ]]; then
         echo 'No Git checkout is mounted; it was not brought up to date.' >&2
@@ -411,14 +414,22 @@ sync_branches() {
     # `clone --branch` fetches one branch only, which would also hide `staging`
     # from the assistant's own `git fetch`. Ask for every branch, on every run.
     "${windows_git[@]}" remote set-branches origin '*' || return 1
+    if ! GIT_TERMINAL_PROMPT=0 "${windows_git[@]}" fetch --quiet --prune origin; then
+        echo 'Could not reach the repository, so the checkout could not be brought up to date and nothing was installed from it. Check your network, then run the install command from the README again.' >&2
+        return 1
+    fi
     # The rule itself is scripts/git-branches.sh, the same helper the Update
-    # OSINT AI icon runs: fetch, fast-forward `main`, fast-forward `staging`, merge
-    # `main` into `staging` - and refuse, changing nothing, rather than resolve a
-    # conflict, discard a commit or leave a detached checkout. There is no second
-    # copy of that rule here on purpose: a second, weaker copy is how this
-    # installer came to install a checkout that had never been brought forward.
-    if [[ ! -f /mnt/osint-ai/scripts/git-branches.sh ]]; then
-        echo 'This checkout has no scripts/git-branches.sh, so the program could not be brought up to date before it was installed. Update the checkout in your Windows Git app, then run the install command from the README again.' >&2
+    # OSINT AI icon runs: fast-forward `main`, fast-forward `staging`, merge `main`
+    # into `staging` - and refuse, changing nothing, rather than resolve a
+    # conflict, discard a commit or leave a detached checkout. It is read out of
+    # the fetched `main` rather than taken from the checkout, because the checkout
+    # is the thing being repaired: its own copy is exactly what is out of date when
+    # a repair is needed, and a stale copy is how this installer came to install a
+    # checkout that had never been brought forward.
+    helper=/run/osint-git-branches.sh
+    if ! "${windows_git[@]}" show origin/main:scripts/git-branches.sh > "$helper" 2>/dev/null; then
+        rm -f "$helper"
+        echo 'The published repository has no scripts/git-branches.sh on main, so the program could not be brought up to date before it was installed. Ask your maintainer to publish it, then run the install command from the README again.' >&2
         return 1
     fi
     # `safe.directory`: this runs as root, before the `osint` user exists, against
@@ -430,8 +441,9 @@ sync_branches() {
         GIT_CONFIG_COUNT=1 \
         GIT_CONFIG_KEY_0=safe.directory \
         GIT_CONFIG_VALUE_0=/mnt/osint-ai \
-        /bin/bash -p /mnt/osint-ai/scripts/git-branches.sh /mnt/osint-ai "$REPOSITORY" \
+        /bin/bash -p "$helper" /mnt/osint-ai "$REPOSITORY" \
         || status=$?
+    rm -f "$helper"
     if ((status != 0)); then
         echo 'The checkout was not brought fully up to date, so nothing was installed from it. Fix what it named above, then run the install command from the README again.' >&2
         return 1
