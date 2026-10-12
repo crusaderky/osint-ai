@@ -41,12 +41,20 @@ fi
 mapfile -t projects < <(/usr/bin/python3 -I -c 'import json;c=json.load(open("/etc/osint-ai.json"));print(c["linux_project"]);print(c["windows_project"])')
 linux=${projects[0]:-}
 windows=${projects[1]:-}
-for path in "$linux" "$windows"; do
-    [[ $path == /* && $path != */ && -d $path ]] || {
-        echo "The installation names a checkout that is not there: $path" >&2
-        exit 1
-    }
-done
+[[ $linux == /* && $linux != */ && -d $linux ]] || {
+    echo "The installation names a Linux checkout that is not there: ${linux:-nothing}" >&2
+    exit 1
+}
+# `windows_project` is a Windows path: `C:\Users\<name>\osint-ai` names no
+# directory inside this distribution, and asking whether it does is how this
+# update used to stop before doing anything. The boot hook mounts that folder at
+# /mnt/osint-ai, and that mount point is what every step below reads; the mount
+# helper below refuses a Windows path it cannot resolve.
+[[ -n $windows ]] || {
+    echo 'The installation names no Windows checkout. Run the install command from the README (Install on Windows).' >&2
+    exit 1
+}
+windows_mount=/mnt/osint-ai
 # The one place a checkout or an environment is touched, so every caller below is
 # the checkout's own user with a cleared environment: no inherited PATH, no
 # inherited Git identity, and nothing that could reach the assistant's session.
@@ -62,6 +70,10 @@ mount_helper=/usr/local/lib/osint-ai/mount-workspace.py
     exit 1
 }
 /usr/bin/python3 -I "$mount_helper"
+[[ -d $windows_mount ]] || {
+    echo "The Windows checkout at $windows was not mounted at $windows_mount." >&2
+    exit 1
+}
 
 # 2. The Linux program checkout. It refuses an uncommitted tree and leaves itself
 # untouched when it does; that is a refusal for the whole update, because every
@@ -107,7 +119,7 @@ expected_origin=$(as_osint git -C "$linux" remote get-url origin) || {
     exit 1
 }
 status=0
-as_osint /bin/bash -p /usr/local/lib/osint-ai/git-branches.sh "$windows" "$expected_origin" || status=$?
+as_osint /bin/bash -p /usr/local/lib/osint-ai/git-branches.sh "$windows_mount" "$expected_origin" || status=$?
 if ((status == 1)); then
     echo 'The WSL program and its runtime were updated; the Windows checkout was left as it was.' >&2
     exit 1

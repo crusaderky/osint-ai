@@ -7,9 +7,11 @@ whole at `/osint-ai`: those PCs still have the old root-owned copies in
 checkout copy. Reinstall the private WSL distribution (`wsl --unregister osint-ai`,
 then run the README's install line again) for that. **Update OSINT AI** refreshes those
 copies from the Linux checkout on every later click, and a rerun of the installer
-refreshes them from the checkout being installed, so a change to `scripts/` reaches
-an installed PC without a reinstall - which is new, and worth checking on a real
-PC. The Windows checkout and its `workspace/` content are not touched by the
+refreshes them from the checkout being installed, after bringing both checkouts
+forward - the Windows one with `scripts/git-branches.sh`, then the Linux one with
+`pixi r update-project` - so a change to `scripts/` reaches an installed PC
+without a reinstall, and a rerun still repairs a PC whose installed updater is
+itself the broken file. Both are new, and worth checking on a real PC. The Windows checkout and its `workspace/` content are not touched by the
 installer. The agent home moved to
 `~/.local/state/osint-ai/agent-home` in both deployments, so an old
 `/var/lib/osint-ai/agent-home` is simply unused; unregistering the distro deletes

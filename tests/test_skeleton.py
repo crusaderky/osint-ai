@@ -493,6 +493,45 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("expected_origin=", script)
         self.assertIn("OSINT_SANDBOX", script)
 
+    def test_the_installer_brings_the_checkout_it_installs_the_runtime_from_forward(self):
+        """A rerun repairs an installation, so it may not install stale code.
+
+        The root-owned runtime is installed from the Linux checkout, which only the
+        Update OSINT AI icon otherwise moves. Rerunning the installer is the
+        documented way to repair an installation - including one whose installed
+        updater is itself the file being fixed - so it runs that checkout's own
+        update step first, as the user that owns it, before installing from it.
+        """
+        script = (WINDOWS / "Install.ps1").read_text()
+        self.assertIn("linux_update=$LINUX_PROJECT/scripts/update-project.sh", script)
+        self.assertIn(
+            "runuser -u osint -- env -i HOME=/home/osint PATH=/usr/local/bin:/usr/bin:/bin",
+            script,
+        )
+        self.assertLess(
+            script.index("linux_update=$LINUX_PROJECT/scripts/update-project.sh"),
+            script.index("runtime_installer=$LINUX_PROJECT/windows/install-runtime.sh"),
+            "the runtime must be installed from a checkout that was brought forward",
+        )
+
+    def test_the_windows_updater_uses_the_mount_point_not_the_windows_path(self):
+        """`windows_project` is a Windows path; this distribution never sees it.
+
+        The updater required both paths in /etc/osint-ai.json to be absolute
+        directories *inside WSL*, so every click of Update OSINT AI stopped at "The
+        installation names a checkout that is not there: C:\\Users\\<name>\\osint-ai"
+        before it updated anything, and the branch helper was handed that Windows
+        path to walk. The Windows folder is mounted at /mnt/osint-ai, and that is
+        what the update reads.
+        """
+        script = (WINDOWS / "update-installation.sh").read_text()
+        self.assertIn("windows_mount=/mnt/osint-ai", script)
+        self.assertIn('git-branches.sh "$windows_mount"', script)
+        self.assertNotIn('git-branches.sh "$windows"', script)
+        self.assertNotIn('for path in "$linux" "$windows"', script)
+        # The Linux checkout really is a Linux directory, and is still checked.
+        self.assertIn('[[ $linux == /* && $linux != */ && -d $linux ]]', script)
+
     def test_apparmor_profile_names_the_pinned_bubblewrap(self):
         """Ubuntu 23.10+ grants `userns` per executable path, so name ours.
 

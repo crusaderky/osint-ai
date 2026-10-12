@@ -304,6 +304,13 @@ installation can never run provisioning from a checkout that was left behind.
 That helper runs as root here, because the `osint` user does not exist yet, with
 `safe.directory` for that one checkout; every later update runs it as `osint`.
 
+A rerun does the same for the Linux checkout, as `osint`, before it installs the
+root-owned runtime out of it: the runtime comes from there, and a rerun is the
+documented way to repair an installation - including one whose updater is itself
+the file being fixed. It is the same `update-project` step the Update OSINT AI
+icon runs, so a checkout the installer could not bring forward stops the rerun
+with the installed runtime untouched.
+
 ### What the Update OSINT AI icon may do
 
 The root-owned runtime under `/usr/local` is installed once outside both

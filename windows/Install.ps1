@@ -429,6 +429,26 @@ if config['windows_project'] != sys.argv[1]:
 PY
     /usr/local/lib/osint-ai/mount-workspace.py
     sync_branches || exit 1
+    # The runtime below is installed from the Linux checkout, and only the Update
+    # OSINT AI icon otherwise moves that one. A rerun of the installer is the
+    # documented way to repair an installation, so bring that checkout forward here
+    # too - the same `pixi r update-project` step the icon runs, as the user that
+    # owns it - before installing the runtime out of it. A checkout too old to
+    # carry that script is used as it is, exactly as it is when it carries no
+    # installer: the fallback below installs from the Windows checkout, which the
+    # branch update above just brought up to date.
+    linux_update=$LINUX_PROJECT/scripts/update-project.sh
+    if [[ -f $linux_update ]]; then
+        linux_status=0
+        runuser -u osint -- env -i HOME=/home/osint PATH=/usr/local/bin:/usr/bin:/bin \
+            /bin/bash -p "$linux_update" || linux_status=$?
+        if ((linux_status != 0)); then
+            echo "The Linux checkout at $LINUX_PROJECT was not brought fully up to date, so the installed runtime was left as it is. Fix what it named above, then run the install command from the README again." >&2
+            exit 1
+        fi
+    else
+        echo "The Linux checkout at $LINUX_PROJECT is too old to update itself; the runtime is installed from the Windows checkout instead." >&2
+    fi
     # The root-owned runtime is installed once, so a PC that predates a change
     # keeps running what it installed until something refreshes it. Prefer the
     # Linux checkout: the sandbox mounts it read-only and the assistant cannot

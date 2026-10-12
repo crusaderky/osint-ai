@@ -10,7 +10,9 @@
 #                                   installed, before the agent has ever run
 #   windows/Install.ps1             first installation and every later run of the
 #                                   published installer (the README's irm one-liner,
-#                                   or the file run directly)
+#                                   or the file run directly); a rerun brings the
+#                                   Linux checkout forward first, so the runtime it
+#                                   installs from it is the published one
 #   windows/update-installation.sh  every click of the Update OSINT AI icon, from
 #                                   the Linux program checkout, after
 #                                   `update-project` pulled it
