@@ -297,9 +297,13 @@ and everything under `scripts/` - is read out of the Windows checkout it was
 pointed at, which the installer leaves on `staging`. It therefore brings that
 checkout forward *before* installing from it, with the same
 `scripts/git-branches.sh` the Update OSINT AI icon runs: `main` fast-forwarded,
-`staging` fast-forwarded and given `main`. It installs nothing when that helper
-refuses - unsaved work, a branch that moved on in two places, a merge that would
-conflict, or an origin that is not the one the installer was given - so a first
+`staging` fast-forwarded and given `main`. That helper is read out of the fetched
+`main`, never out of the checkout it is about to move: the checkout is the thing
+being repaired, and its own copy of that rule is exactly what is out of date when
+a repair is needed. It installs nothing when that helper
+refuses - unsaved changes to tracked files, a branch that moved on in two places,
+a merge that would conflict, or an origin that is not the one the installer was
+given - so a first
 installation can never run provisioning from a checkout that was left behind.
 That helper runs as root here, because the `osint` user does not exist yet, with
 `safe.directory` for that one checkout; every later update runs it as `osint`.

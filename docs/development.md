@@ -53,13 +53,14 @@ run the same branch helper, `scripts/git-branches.sh`:
 The branch rule is the same everywhere: `main` is the published program and only
 ever moves forward; `staging` receives it and keeps whatever the assistant has
 committed but not published. That includes the Windows installer, which runs the
-same helper on the Windows checkout before it installs anything from it - and, on
-a rerun, `pixi r update-project` on the Linux checkout, because the root-owned
-runtime is installed out of that one. The provisioning script, the runtime files
-and the guided sandbox are all read out of those checkouts, so a checkout it could
-not bring forward is a refusal, not an installation of old code. A checkout with no `staging` branch - the WSL
-program checkout is cloned with `--branch main` on purpose - only fast-forwards
-its `main`. Nothing is ever pushed, discarded, rebased or conflict-resolved: a
+same helper on the Windows checkout before it installs anything from it - read out
+of the fetched `main` rather than out of that checkout, which is the thing being
+repaired - and, on a rerun, `pixi r update-project` on the Linux checkout, because
+the root-owned runtime is installed out of that one. The provisioning script, the
+runtime files and the guided sandbox are all read out of those checkouts, so a
+checkout it could not bring forward is a refusal, not an installation of old code.
+A checkout with no `staging` branch - the WSL program checkout is cloned with
+`--branch main` on purpose - only fast-forwards its `main`. Nothing is ever pushed, discarded, rebased or conflict-resolved: a
 checkout that cannot be updated is left exactly as it was, and a branch that
 moved on in two places is reported for the human to reconcile in their Git app.
 

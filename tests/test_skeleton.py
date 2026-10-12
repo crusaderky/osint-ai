@@ -914,14 +914,24 @@ class ConfigurationTests(unittest.TestCase):
         # discarding unpublished work. A second, weaker copy of the rule in this
         # file is how the installer came to install a checkout that had never been
         # brought forward.
-        self.assertIn(
-            '/bin/bash -p /mnt/osint-ai/scripts/git-branches.sh /mnt/osint-ai "$REPOSITORY"',
-            script,
+        # Read out of the fetched `main`, not taken from the checkout: the checkout
+        # is the thing being repaired, and its own copy of this very rule is what is
+        # out of date when a repair is needed. Fetching it from the checkout is how
+        # the installer came to leave an installation behind.
+        self.assertIn("show origin/main:scripts/git-branches.sh", script)
+        self.assertIn('/bin/bash -p "$helper" /mnt/osint-ai "$REPOSITORY"', script)
+        self.assertNotIn("/bin/bash -p /mnt/osint-ai/scripts/git-branches.sh", script)
+        self.assertLess(
+            script.index("fetch --quiet --prune origin"),
+            script.index("show origin/main:scripts/git-branches.sh"),
+            "the published helper is read after the fetch that publishes it",
         )
         self.assertIn(
             "remote set-branches origin '*'", script
         )  # every branch, or the helper cannot see staging
         self.assertIn('GIT_CONFIG_KEY_0=safe.directory', script)
+        # Those Git commands run in a `.git` the assistant can write.
+        self.assertIn("core.hooksPath=/dev/null -c core.fsmonitor=false", script)
         self.assertNotIn("merge --ff-only", script)
         self.assertNotIn("checkout main", script)
         self.assertNotIn("checkout --quiet staging", script)
