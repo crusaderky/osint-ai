@@ -235,3 +235,16 @@ python -c "import importlib.metadata as m; [print(d.name, d.version) for d in m.
   registry, blocked request).
 * Reports are written as Markdown first, then converted to PDF when the user
   wants a document.
+
+## Never commit reports or investigation material
+
+* Never commit report files (`.md` or `.pdf` deliverables, e.g. anything under
+  `reports/`) or any file whose content is about a specific investigation,
+  subject or client to Git — not on `staging`, not anywhere. Deliverables live
+  only on the local disk for the user to keep, share or delete themselves.
+* `AGENTS.md`, skills and general reference material are still committed as
+  normal; the exclusion applies to case-specific content.
+* If such files have been committed by mistake, untrack them
+  (`git rm --cached <paths>`, then commit) while leaving the local files in
+  place, and tell the user which past commits still contain them so they can
+  decide about rewriting or not pushing those commits.
