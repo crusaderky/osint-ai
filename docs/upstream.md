@@ -107,7 +107,6 @@ own licences, which requires shipping or offering their source as each licence
 requires.
 
 **No third-party terminal is bundled or downloaded.** The assistant starts in a
-plain `wsl.exe` console window, which every Windows PC already has. MobaXterm was
-tried first and removed: its `-newtab "<command>"` runs the command without a
-terminal - no stdin, no tty - which is a full-screen terminal program's one hard
-requirement.
+plain `wsl.exe` console window, which every Windows PC already has: it gives the
+distribution a pty - no stdin, no tty problems - which is a full-screen terminal
+program's one hard requirement.

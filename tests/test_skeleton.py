@@ -963,18 +963,17 @@ class ConfigurationTests(unittest.TestCase):
     def test_the_terminal_shortcut_is_a_console_not_a_pipe(self):
         """The assistant is a full-screen terminal program, so it needs a pty.
 
-        The shortcut used to open MobaXterm with `-newtab "<command>"`, and that
-        gives the command **pipes**: no stdin, no tty, measured on a real
-        installation. Pi printed its startup lines into the tab and never took a
-        keystroke. A `wsl.exe` console window gives the distribution a pty, which
-        is all the assistant needs, and every Windows PC already has it.
+        The assistant is a full-screen terminal program: pipes instead of a pty
+        mean it prints its startup lines and never takes a keystroke. A
+        `wsl.exe` console window gives the distribution a pty, which is all the
+        assistant needs, and every Windows PC already has it.
         """
         script = (WINDOWS / "Install.ps1").read_text()
         self.assertIn("'OSINT AI Terminal.lnk'", script)
         self.assertIn("System32" + chr(92) + "wsl.exe", script)
         self.assertIn("-d $Distro -u osint -e /usr/local/bin/osint-terminal", script)
         # No third-party terminal, no download of one, and no second shortcut to
-        # choose between. (`-newtab` appears in the comment that says why it went.)
+        # choose between.
         self.assertNotIn("MobaXterm.exe", script)
         self.assertNotIn("mobatek.net", script)
         self.assertNotIn("$SkipMobaXterm", script)

@@ -562,12 +562,9 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
     $shell = New-Object -ComObject WScript.Shell
     $desktop = [Environment]::GetFolderPath('Desktop')
     # One terminal shortcut, and it is a plain Windows console: the assistant is a
-    # full-screen terminal program, and a console window is a terminal. MobaXterm
-    # was tried first and is gone: `-newtab "<command>"` gives the command pipes
-    # instead of a terminal - no stdin, no tty - so Pi could print its startup
-    # lines and never take a keystroke. `wsl.exe` in a console window gives the
-    # distribution a pty, which is what the assistant needs, and it is present on
-    # every Windows 11 PC.
+    # full-screen terminal program, and a console window is a terminal. `wsl.exe`
+    # in a console window gives the distribution a pty, which is what the
+    # assistant needs, and it is present on every Windows 11 PC.
     $terminal = $shell.CreateShortcut((Join-Path $desktop 'OSINT AI Terminal.lnk'))
     $terminal.TargetPath = (Join-Path $env:WINDIR 'System32\wsl.exe')
     $terminal.Arguments = "-d $Distro -u osint -e /usr/local/bin/osint-terminal"

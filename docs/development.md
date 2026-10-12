@@ -184,15 +184,9 @@ The installer:
   keep working.
 - Starts the assistant in a plain `wsl.exe` console window, through
   `osint-terminal` in the Linux checkout: that reports whether local inference
-  answers, then starts the assistant. MobaXterm was the first choice and is gone -
-  `-newtab "<command>"` runs the command with pipes instead of a terminal, so the
-  assistant could print its startup lines and never take a keystroke. A console
-  window gives the distribution a pty, needs no third-party download, and needs
-  nothing enabled inside the distribution. MobaXterm's *own* WSL sessions do not
-  work here either, by design: they run a Windows helper out of
-  `%APPDATA%\MobaXterm` **inside** the distribution through WSL interop, and this
-  distribution neither mounts the Windows drives nor runs Windows binaries inside
-  (see `docs/security.md`).
+  answers, then starts the assistant. A console window gives the distribution a
+  pty - what a full-screen terminal program needs - and no third-party download
+  or WSL-interop helper is involved (see `docs/security.md`).
 - Creates desktop shortcuts: **OSINT AI Terminal** (a console window running
   `osint-terminal`),
   **Start llama.cpp** and **Stop llama.cpp** (the same `_server` task the Linux
