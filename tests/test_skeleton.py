@@ -2658,16 +2658,37 @@ class BranchUpdateTests(unittest.TestCase):
     def test_a_dirty_checkout_is_refused_and_left_alone(self):
         work = self.work_checkout()
         self.publish_main("one\nreleased\n")
-        (work / "unsaved.txt").write_text("not saved yet\n")
+        (work / "staging.txt").write_text("staging work\nnot saved yet\n")
         before = self.head(work)
         result = self.update(work)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("has changes Git has not saved yet", result.stderr)
-        self.assertIn("unsaved.txt", result.stderr)
+        self.assertIn("staging.txt", result.stderr)
         self.assertEqual(self.branch(work), "staging")
         self.assertEqual(self.head(work), before, "a refused update must change nothing")
         self.assertEqual(self.head(work, "main"), self.head(work, "origin/main"))
-        self.assertTrue((work / "unsaved.txt").is_file())
+        # The edit is still there, in the checkout, untouched.
+        self.assertIn("not saved yet", (work / "staging.txt").read_text())
+
+    def test_an_untracked_file_does_not_block_the_update(self):
+        """A report nobody has committed yet is not a reason to refuse.
+
+        The assistant writes its reports and skills into the checkout and the user
+        commits them in their Git app when they are ready, so an untracked file is
+        the normal state of a used installation - and refusing on one is how the
+        installer stopped repairing a PC. Git itself refuses an update that would
+        overwrite an untracked file, and that is reported as a failure rather than
+        resolved.
+        """
+        work = self.work_checkout()
+        self.publish_main("one\nreleased\n")
+        (work / "workspace-look").mkdir()
+        (work / "workspace-look/report.md").write_text("a report\n")
+        result = self.update(work)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.branch(work), "staging")
+        self.assertIn("merged main", result.stdout)
+        self.assertEqual((work / "workspace-look/report.md").read_text(), "a report\n")
 
     def test_a_checkout_without_staging_only_fast_forwards_main(self):
         work = self.work_checkout("--branch", "main", "--single-branch")

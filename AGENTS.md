@@ -201,7 +201,9 @@ dependencies; it must ask instead.
   path, root only for `/usr/local` and the Windows mount, every checkout and
   environment written as `osint`, the Windows checkout's origin pinned to the Linux
   checkout's, its Git hooks, fsmonitor and pager switched off, and a checkout with
-  unsaved work, another branch or a split history refused rather than resolved.
+  unsaved changes to tracked files, another branch or a split history refused
+  rather than resolved. Untracked files - the assistant's uncommitted reports and
+  skills - are left alone and do not refuse the update.
   (On a machine that runs policy hooks, `-c core.hooksPath=/dev/null` and
   `-c core.fsmonitor=false` in `scripts/git-branches.sh` are deliberate, not an
   oversight.) The agent's own

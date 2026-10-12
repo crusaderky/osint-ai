@@ -71,9 +71,14 @@ sync_branches() {
         fi
     fi
 
-    # Uncommitted work is checked before anything moves. A branch switch would
-    # either refuse halfway or take the changes along with it.
-    changes=$(sync_git "$checkout" status --porcelain) || {
+    # Uncommitted work is checked before anything moves: a branch switch carries
+    # changes to tracked files along with it, or refuses halfway. Untracked files
+    # are deliberately not defended against - the checkout collects them, as the
+    # reports and skills the assistant has written and nobody has committed yet,
+    # and a branch switch leaves them where they are - and Git refuses by itself
+    # any update that would overwrite one, which this reports as a failed update
+    # rather than something to resolve.
+    changes=$(sync_git "$checkout" status --porcelain --untracked-files=no) || {
         printf 'Could not read the state of %s.\n' "$checkout" >&2
         return 1
     }
