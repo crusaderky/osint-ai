@@ -384,6 +384,19 @@ class ConfigurationTests(unittest.TestCase):
         parse_test = (ROOT / "tests/Test-Installer.ps1").read_text()
         self.assertIn('-replace "`r`n", "`n"', parse_test)
 
+    def test_provisioning_checks_the_mount_point_not_the_windows_path(self):
+        """The Windows path names no directory inside the distribution.
+
+        Provisioning used to ask whether ``C:\\Users\\<name>\\osint-ai`` was a
+        directory *inside WSL*, which it never is, so a first installation stopped
+        at "Windows checkout is not mounted." before it installed anything. That
+        same folder is bound at /mnt/osint-ai, and that is what has to exist.
+        """
+        script = (WINDOWS / "provision-wsl.sh").read_text()
+        self.assertIn("WINDOWS_MOUNT=/mnt/osint-ai", script)
+        self.assertIn("[[ -d $WINDOWS_MOUNT ]]", script)
+        self.assertNotIn("[[ -d $WINDOWS_CHECKOUT ]]", script)
+
     def test_provisioning_creates_only_inference_state(self):
         """The Windows installer must not pre-create the assistant's state.
 
@@ -893,6 +906,34 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("OSINT AI Terminal (basic)", script)
         self.assertIn("using a plain Windows console shortcut", script)
         self.assertIn("/mnt/osint-ai/windows/provision-wsl.sh", script)
+
+    def test_the_reachability_check_asks_the_launcher_as_the_assistant_user(self):
+        """The launcher refuses to run as root, so the probe has to be `osint`.
+
+        The installer asked `sandbox.py --wsl --inference-url` through the same root
+        transport that provisions the distribution. That refusal was then reported as
+        "this installation is older than this installer", so the one check that the
+        assistant really reaches the model server on Windows could never pass.
+        """
+        script = (WINDOWS / "Install.ps1").read_text()
+        capture = re.search(r"function Invoke-WslCapture.*?\n}\n", script, re.S)
+        self.assertIsNotNone(capture, "Invoke-WslCapture is gone; the probe moved")
+        self.assertIn("--user osint", capture.group(0))
+        self.assertNotIn("--user root", capture.group(0))
+        # Root still runs the one script that installs into the distribution.
+        self.assertIn("--user root", script)
+
+    def test_the_mobaxterm_search_only_accepts_a_mobaxterm_executable(self):
+        """An uninstall entry's DisplayIcon is whatever executable that program ships.
+
+        Scanning the uninstall registry without checking the file name handed the
+        terminal shortcut an unrelated program - Signal, on the machine this was found
+        on - because its DisplayIcon was simply the first candidate that existed.
+        """
+        script = (WINDOWS / "Install.ps1").read_text()
+        search = re.search(r"function Get-MobaXterm.*?\n}\n", script, re.S)
+        self.assertIsNotNone(search, "Get-MobaXterm is gone; the shortcut moved")
+        self.assertIn("-like 'MobaXterm*.exe'", search.group(0))
 
     def test_the_runtime_never_names_the_removed_installer_wrapper(self):
         """The wrapper went with the zip, so no message may send a user to it.
@@ -1963,17 +2004,27 @@ class SandboxArgumentTests(SandboxFixture):
             self.assertIsNone(sandbox.default_gateway())
 
     def test_entry_prefers_installed_copy(self):
+        installed = "/usr/local/lib/osint-ai/pi-entry.sh"
         with patch("pathlib.Path.is_file", return_value=True):
             args = self.argv()
-        self.assertEqual(args[-2:], ["/bin/bash", "/usr/local/lib/osint-ai/pi-entry.sh"])
+        self.assertEqual(args[-2:], ["/bin/bash", installed])
         # Without a root-owned installation: the agent's own (developer-editable)
-        # copy in plain Linux, the read-only program checkout in WSL.
-        self.assertEqual(self.argv()[-2:], ["/bin/bash", f"{CHECKOUT_PATH}/scripts/pi-entry.sh"])
-        mount = self.windows_checkout()
-        self.assertEqual(
-            self.argv(mode="wsl", windows=mount)[-2:],
-            ["/bin/bash", f"{PROGRAM_PATH}/scripts/pi-entry.sh"],
-        )
+        # copy in plain Linux, the read-only program checkout in WSL. The suite also
+        # runs on an installed PC, where the root-owned copy really is there, so the
+        # fallback is checked with that one file hidden rather than assumed absent.
+        real_is_file = Path.is_file
+        with patch(
+            "pathlib.Path.is_file",
+            lambda path: False if str(path) == installed else real_is_file(path),
+        ):
+            self.assertEqual(
+                self.argv()[-2:], ["/bin/bash", f"{CHECKOUT_PATH}/scripts/pi-entry.sh"]
+            )
+            mount = self.windows_checkout()
+            self.assertEqual(
+                self.argv(mode="wsl", windows=mount)[-2:],
+                ["/bin/bash", f"{PROGRAM_PATH}/scripts/pi-entry.sh"],
+            )
 
     def test_protected_symlink_rejected(self):
         link = self.project / "workspace"

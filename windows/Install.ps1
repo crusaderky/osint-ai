@@ -58,11 +58,15 @@ function ConvertTo-ShellLiteral([string]$Value) {
 }
 
 function Invoke-WslCapture([string]$Script) {
-    # Same transport as Invoke-WslScript, but returns what the script printed.
+    # Same transport as Invoke-WslScript, but returns what the script printed, and
+    # runs as the ordinary WSL user instead of root: the reachability check asks the
+    # launcher for the address the *assistant* uses, and the launcher refuses to run
+    # as root, so as root the answer was always "this installation is too old to
+    # name the address" - which is exactly what the check exists to rule out.
     $normalized = $Script.Replace("`r`n", "`n")
     $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($normalized))
     $command = "printf %s $encoded | base64 -d | /bin/bash"
-    $output = & wsl.exe --distribution $Distro --user root --exec /bin/bash -c $command
+    $output = & wsl.exe --distribution $Distro --user osint --exec /bin/bash -c $command
     if ($LASTEXITCODE -ne 0) {
         throw "WSL command failed (exit $LASTEXITCODE)."
     }
@@ -249,7 +253,14 @@ function Get-MobaXterm {
     $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\MobaXterm\MobaXterm.exe')
     $candidates += (Get-ChildItem -Path $InstallRoot -Filter 'MobaXterm*.exe' -Recurse -ErrorAction SilentlyContinue |
         Select-Object -ExpandProperty FullName)
-    $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+    # The uninstall registry is full of unrelated programs, and its DisplayIcon
+    # names whatever executable that program ships. Only a file actually called
+    # MobaXterm*.exe is MobaXterm; without this the shortcut was pointed at
+    # whatever registry entry happened to be scanned first.
+    $candidates |
+        Where-Object { $_ -and (Split-Path -Leaf $_) -like 'MobaXterm*.exe' } |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Select-Object -First 1
 }
 
 function Install-MobaXterm {

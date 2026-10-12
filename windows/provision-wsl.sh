@@ -6,7 +6,7 @@
 # It creates the second (Linux) checkout that owns Git, Pixi and the runtime.
 set -euo pipefail
 [[ $EUID == 0 ]] || { echo 'Provisioning requires WSL root.' >&2; exit 1; }
-[[ $# == 4 ]] || { echo 'Usage: provision-wsl.sh <windows checkout> <repository> <ref> <linux project>' >&2; exit 1; }
+[[ $# == 4 ]] || { echo 'Usage: provision-wsl.sh <windows project folder> <repository> <ref> <linux project>' >&2; exit 1; }
 [[ ! -e /etc/osint-ai-installed ]] || { echo 'Already provisioned; refusing to overwrite trusted runtime.'; exit 1; }
 [[ -f /etc/osint-ai-installing ]] || { echo 'Not an installer-owned distribution.' >&2; exit 1; }
 
@@ -14,12 +14,17 @@ WINDOWS_CHECKOUT=$1
 REPOSITORY=$2
 REF=$3
 LINUX_PROJECT=$4
+# Where WSL sees that checkout. $1 is the Windows path, which names no directory
+# inside WSL: Install.ps1 binds the folder here before this script runs, and the
+# boot hook mounts it here again on every later start. $1 is still what
+# /etc/osint-ai.json records, because that is what the boot hook resolves.
+WINDOWS_MOUNT=/mnt/osint-ai
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)   # windows/
 REPO=$(cd "$HERE/.." && pwd)                         # the checkout being installed
 [[ -f $REPO/pixi.toml && -f $REPO/scripts/sandbox.py ]] || {
     echo 'Unexpected checkout layout: need scripts/sandbox.py next to windows/.' >&2; exit 1; }
 [[ $LINUX_PROJECT =~ ^/[A-Za-z0-9._/-]+$ && $LINUX_PROJECT != */ ]] || { echo 'Bad Linux project path.' >&2; exit 1; }
-[[ -d $WINDOWS_CHECKOUT ]] || { echo 'Windows checkout is not mounted.' >&2; exit 1; }
+[[ -d $WINDOWS_MOUNT ]] || { echo "The Windows checkout is not mounted at $WINDOWS_MOUNT." >&2; exit 1; }
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
