@@ -31,12 +31,7 @@ param(
     [string]$RepositoryUrl = 'https://github.com/crusaderky/osint-ai.git',
     [string]$Ref = 'main',
     [string]$ProjectPath = (Join-Path $env:USERPROFILE 'osint-ai'),
-    [string]$LinuxProjectPath = '/home/osint/osint-ai',
-    # MobaXterm is third-party freeware: reuse an existing installation when
-    # present, otherwise download this pinned, checksum-verified portable zip.
-    [string]$MobaXtermUrl = 'https://download.mobatek.net/2652026082870834/MobaXterm_Portable_v26.5.zip',
-    [string]$MobaXtermSha256 = 'a26e7e4e2f7bd47a13fbc6d93d08a2d946f21c3e0d135b9e4f55149842c09ef6',
-    [switch]$SkipMobaXterm
+    [string]$LinuxProjectPath = '/home/osint/osint-ai'
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -226,107 +221,6 @@ function Assert-NoReparseParents([string]$Path) {
         if ($parent -eq $current) { break }
         $current = $parent
     }
-}
-
-function Get-MobaXterm {
-    # Existing installation wins: MobaXterm is freeware, not something to copy
-    # around a network without checking its licence.
-    $candidates = @()
-    $key = Get-Command MobaXterm.exe -ErrorAction SilentlyContinue
-    if ($key) { $candidates += $key.Source }
-    # MobaXterm's own installer records its folder here, and leaves
-    # `InstallLocation` and `DisplayIcon` empty in its uninstall entry - so the
-    # registry scan below never finds it. Missing it is how a PC with MobaXterm
-    # installed was handed a second, downloaded copy instead: MobaXterm runs one
-    # instance per desktop, so the copy started by the icon handed its command to
-    # the MobaXterm already running, which ignored it, and the icon did nothing.
-    foreach ($hive in @(
-        'HKLM:\SOFTWARE\Mobatek\MobaXterm',
-        'HKLM:\SOFTWARE\WOW6432Node\Mobatek\MobaXterm',
-        'HKCU:\SOFTWARE\Mobatek\MobaXterm'
-    )) {
-        $entry = Get-ItemProperty $hive -ErrorAction SilentlyContinue
-        if (-not $entry) { continue }
-        $installed = $entry | Select-Object -ExpandProperty InstallDir -ErrorAction SilentlyContinue
-        if ($installed) { $candidates += (Join-Path $installed 'MobaXterm.exe') }
-    }
-    foreach ($hive in @(
-        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
-        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
-    )) {
-        if (!(Test-Path $hive)) { continue }
-        foreach ($entry in Get-ChildItem $hive -ErrorAction SilentlyContinue) {
-            $item = Get-ItemProperty $entry.PSPath -ErrorAction SilentlyContinue
-            if (-not $item) { continue }
-            # Select-Object tolerates a missing value; strict mode does not.
-            $location = $item | Select-Object -ExpandProperty InstallLocation -ErrorAction SilentlyContinue
-            if ($location) { $candidates += (Join-Path $location 'MobaXterm.exe') }
-            $icon = $item | Select-Object -ExpandProperty DisplayIcon -ErrorAction SilentlyContinue
-            if ($icon) { $candidates += ($icon -replace ',\d+$', '') }
-        }
-    }
-    # The places an installation puts itself when the registry says nothing, the
-    # portable copy the installer may have downloaded earlier, and the folder
-    # MobaXterm keeps its own files in when it was installed per user.
-    foreach ($folder in @(
-        (Join-Path $env:LOCALAPPDATA 'Programs\MobaXterm'),
-        (Join-Path $env:APPDATA 'MobaXterm')
-    )) {
-        $candidates += (Join-Path $folder 'MobaXterm.exe')
-    }
-    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
-        if ($root) { $candidates += (Join-Path $root 'Mobatek\MobaXterm\MobaXterm.exe') }
-    }
-    $candidates += (Get-ChildItem -Path $InstallRoot -Filter 'MobaXterm*.exe' -Recurse -ErrorAction SilentlyContinue |
-        Select-Object -ExpandProperty FullName)
-    # The uninstall registry is full of unrelated programs, and its DisplayIcon
-    # names whatever executable that program ships. Only a file actually called
-    # MobaXterm*.exe is MobaXterm; without this the shortcut was pointed at
-    # whatever registry entry happened to be scanned first.
-    $candidates |
-        Where-Object { $_ -and (Split-Path -Leaf $_) -like 'MobaXterm*.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
-        Select-Object -First 1
-}
-
-function Install-MobaXterm {
-    # Returns the path to MobaXterm.exe, or $null when it is unavailable.
-    $existing = Get-MobaXterm
-    if ($existing) {
-        Write-Host "Using the MobaXterm installation already on this PC: $existing"
-        return $existing
-    }
-    if ($SkipMobaXterm) { return $null }
-    $folder = Join-Path $InstallRoot 'MobaXterm'
-    New-Item -ItemType Directory -Force -Path $folder | Out-Null
-    $found = Get-ChildItem -Path $folder -Filter 'MobaXterm*.exe' -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if (-not $found) {
-        Write-Host 'Downloading MobaXterm (portable, checksum verified)...'
-        Write-Host 'MobaXterm is third-party software; its own licence applies:'
-        Write-Host '  https://mobaxterm.mobatek.net/license.html'
-        $archive = Join-Path $folder ([IO.Path]::GetFileName(($MobaXtermUrl -split '\?')[0]))
-        try {
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            Invoke-WebRequest -UseBasicParsing -Uri $MobaXtermUrl -OutFile $archive
-            if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $MobaXtermSha256) {
-                throw 'Checksum mismatch. Nothing was extracted.'
-            }
-            Expand-Archive -LiteralPath $archive -DestinationPath $folder -Force
-        } catch {
-            # A rotting download URL must not stop the actual installation.
-            Write-Host "MobaXterm was not installed: $($_.Exception.Message)" -ForegroundColor Yellow
-            Write-Host 'Install MobaXterm yourself and rerun to use it; the terminal shortcut works without it.'
-            Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-            return $null
-        }
-        Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-        $found = Get-ChildItem -Path $folder -Filter 'MobaXterm*.exe' -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-    }
-    if (-not $found) { return $null }
-    return $found.FullName
 }
 
 try {
@@ -665,29 +559,20 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
         'pause'
     )
 
-    $moba = Install-MobaXterm
     $shell = New-Object -ComObject WScript.Shell
     $desktop = [Environment]::GetFolderPath('Desktop')
-    if ($moba) {
-        # MobaXterm opens a local terminal tab and runs the WSL client in it.
-        $tab = '-newtab "/cygdrive/c/WINDOWS/System32/wsl.exe -d {0} -u osint -e /usr/local/bin/osint-terminal"' -f $Distro
-        $terminal = $shell.CreateShortcut((Join-Path $desktop 'OSINT AI Terminal.lnk'))
-        $terminal.TargetPath = $moba
-        $terminal.Arguments = $tab
-        $terminal.WorkingDirectory = Split-Path -Parent $moba
-        $terminal.Description = 'Start MobaXterm and open the OSINT AI chatbot.'
-        $terminal.Save()
-    } else {
-        # One terminal shortcut, always: MobaXterm when it is installed, and a plain
-        # Windows console when it is not. A second, "basic" shortcut would only ask
-        # the user to choose between two windows that run the same command.
-        Write-Host 'MobaXterm was not installed; using a plain Windows console shortcut.'
-        $terminal = $shell.CreateShortcut((Join-Path $desktop 'OSINT AI Terminal.lnk'))
-        $terminal.TargetPath = (Join-Path $env:WINDIR 'System32\wsl.exe')
-        $terminal.Arguments = "-d $Distro -u osint -e /usr/local/bin/osint-terminal"
-        $terminal.Description = 'Start the OSINT AI chatbot.'
-        $terminal.Save()
-    }
+    # One terminal shortcut, and it is a plain Windows console: the assistant is a
+    # full-screen terminal program, and a console window is a terminal. MobaXterm
+    # was tried first and is gone: `-newtab "<command>"` gives the command pipes
+    # instead of a terminal - no stdin, no tty - so Pi could print its startup
+    # lines and never take a keystroke. `wsl.exe` in a console window gives the
+    # distribution a pty, which is what the assistant needs, and it is present on
+    # every Windows 11 PC.
+    $terminal = $shell.CreateShortcut((Join-Path $desktop 'OSINT AI Terminal.lnk'))
+    $terminal.TargetPath = (Join-Path $env:WINDIR 'System32\wsl.exe')
+    $terminal.Arguments = "-d $Distro -u osint -e /usr/local/bin/osint-terminal"
+    $terminal.Description = 'Start the OSINT AI chatbot.'
+    $terminal.Save()
     $folder = $shell.CreateShortcut((Join-Path $desktop 'OSINT AI Files.lnk'))
     $folder.TargetPath = $ProjectPath
     $folder.Save()

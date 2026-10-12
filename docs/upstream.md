@@ -106,8 +106,8 @@ project environment; releasing the installer keeps those components under their
 own licences, which requires shipping or offering their source as each licence
 requires.
 
-**MobaXterm is not bundled.** The installer reuses an existing installation or
-downloads the pinned portable build from mobaxterm.mobatek.net on the user's own
-machine; MobaXterm's own licence (free for personal use, paid for commercial
-use) applies and must be checked before a commercial rollout. It is outside the
-sandbox trust boundary.
+**No third-party terminal is bundled or downloaded.** The assistant starts in a
+plain `wsl.exe` console window, which every Windows PC already has. MobaXterm was
+tried first and removed: its `-newtab "<command>"` runs the command without a
+terminal - no stdin, no tty - which is a full-screen terminal program's one hard
+requirement.

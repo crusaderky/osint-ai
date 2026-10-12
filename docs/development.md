@@ -182,21 +182,19 @@ The installer:
   distribution at the address `scripts/sandbox.py` resolves, then stops it. A
   failure is reported, not fatal - local inference is optional - and online models
   keep working.
-- Reuses an existing MobaXterm installation or downloads the pinned, checksum
-  verified portable build (`-SkipMobaXterm` disables the download). MobaXterm is
-  third-party freeware under its own licence: check that licence before a
-  commercial rollout or redistribution. When it is unavailable, the one terminal
-  shortcut opens a plain `wsl.exe` console instead; there is no second shortcut to
-  choose between. MobaXterm's *own* WSL sessions (the ones it imports for a
-  distribution) do not work with this one, and that is deliberate: MobaXterm runs a
-  Windows helper out of `%APPDATA%\MobaXterm` **inside** the distribution through
-  WSL interop to reach its window, and this distribution neither mounts the
-  Windows drives nor runs Windows binaries inside (see `docs/security.md`). The
-  **OSINT AI Terminal** shortcut runs `wsl.exe` on the Windows side, which needs
-  neither, and is the supported way in.
-- Creates desktop shortcuts: **OSINT AI Terminal** (MobaXterm tab, runs
-  `osint-terminal` in the Linux checkout: it reports whether local inference
-  answers, then starts the assistant),
+- Starts the assistant in a plain `wsl.exe` console window, through
+  `osint-terminal` in the Linux checkout: that reports whether local inference
+  answers, then starts the assistant. MobaXterm was the first choice and is gone -
+  `-newtab "<command>"` runs the command with pipes instead of a terminal, so the
+  assistant could print its startup lines and never take a keystroke. A console
+  window gives the distribution a pty, needs no third-party download, and needs
+  nothing enabled inside the distribution. MobaXterm's *own* WSL sessions do not
+  work here either, by design: they run a Windows helper out of
+  `%APPDATA%\MobaXterm` **inside** the distribution through WSL interop, and this
+  distribution neither mounts the Windows drives nor runs Windows binaries inside
+  (see `docs/security.md`).
+- Creates desktop shortcuts: **OSINT AI Terminal** (a console window running
+  `osint-terminal`),
   **Start llama.cpp** and **Stop llama.cpp** (the same `_server` task the Linux
   deployment runs, in the Windows checkout's environment),
   **Update OSINT AI** (see below) and
@@ -211,8 +209,8 @@ Uninstalling is manual and documented for users in the README. In short:
 `wsl --unregister osint-ai` deletes the private distribution and its disk, which
 holds the Pi credentials, sessions and settings, the Linux checkout and the
 root-owned launchers under `/usr/local`. Deleting `%LOCALAPPDATA\osint-ai` removes
-the native Pixi binary, the Windows inference environment, its state directory, the
-download cache and the portable MobaXterm copy. The downloaded weights are a third
+the native Pixi binary, the Windows inference environment, its state directory and
+the download cache. The downloaded weights are a third
 place: `%USERPROFILE%\.cache\huggingface` on the Windows side, and
 `~/.cache/huggingface` for a plain Linux install. The inbound firewall rule the
 installer added is named `OSINT AI local inference`. The Windows checkout,
@@ -555,7 +553,7 @@ Linux integration tests exercise real bubblewrap where user namespaces are
 available; otherwise they report an explicit skip. See
 [testing.md](testing.md) for the Pi smoke test, the PowerShell parse test and the
 manual Windows acceptance matrix. Passing Linux tests does not validate a Windows
-installation, reboot, DrvFS, MobaXterm, OAuth or actual inference.
+installation, reboot, DrvFS, OAuth or actual inference.
 
 GitHub Actions runs the same checks on every push to `main` and every pull
 request: `.github/workflows/ci.yml` installs the locked `default` environment

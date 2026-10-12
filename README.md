@@ -86,8 +86,8 @@ account, pay-as-you-go for every prompt.
    limit, monitor, and revoke independently.
 
 4. In the chat prompt, type `/login` and press Enter. Choose **Sign in with an API
-   key**, then **OpenRouter**, and paste your key when prompted. In MobaXterm,
-   right-click to paste.
+   key**, then **OpenRouter**, and paste your key when prompted. Right-click in
+   the window to paste.
 
 5. Close the terminal window and open it again (Double-click **OSINT AI Terminal**
    again) to load [the shortlist of recommended models](#choose-a-model).

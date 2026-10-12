@@ -957,16 +957,28 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("Get-FileHash", script)
         self.assertIn("Restart Windows", script)
         self.assertIn("ConvertTo-ShellLiteral", script)
-        # Third-party terminal: pinned, checksummed, optional, and never bundled.
-        self.assertIn("$MobaXtermSha256", script)
-        self.assertIn("$SkipMobaXterm", script)
         self.assertIn("/usr/local/bin/osint-terminal", script)
-        # One terminal shortcut, not two: the same icon runs MobaXterm when it is
-        # installed and a plain Windows console when it is not, so the user never
-        # has to choose between two windows that run the same command.
-        self.assertNotIn("OSINT AI Terminal (basic)", script)
-        self.assertIn("using a plain Windows console shortcut", script)
         self.assertIn("/mnt/osint-ai/windows/provision-wsl.sh", script)
+
+    def test_the_terminal_shortcut_is_a_console_not_a_pipe(self):
+        """The assistant is a full-screen terminal program, so it needs a pty.
+
+        The shortcut used to open MobaXterm with `-newtab "<command>"`, and that
+        gives the command **pipes**: no stdin, no tty, measured on a real
+        installation. Pi printed its startup lines into the tab and never took a
+        keystroke. A `wsl.exe` console window gives the distribution a pty, which
+        is all the assistant needs, and every Windows PC already has it.
+        """
+        script = (WINDOWS / "Install.ps1").read_text()
+        self.assertIn("'OSINT AI Terminal.lnk'", script)
+        self.assertIn("System32" + chr(92) + "wsl.exe", script)
+        self.assertIn("-d $Distro -u osint -e /usr/local/bin/osint-terminal", script)
+        # No third-party terminal, no download of one, and no second shortcut to
+        # choose between. (`-newtab` appears in the comment that says why it went.)
+        self.assertNotIn("MobaXterm.exe", script)
+        self.assertNotIn("mobatek.net", script)
+        self.assertNotIn("$SkipMobaXterm", script)
+        self.assertNotIn("OSINT AI Terminal (basic)", script)
 
     def test_the_reachability_check_asks_the_launcher_as_the_assistant_user(self):
         """The launcher refuses to run as root, so the probe has to be `osint`.
@@ -983,18 +995,6 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("--user root", capture.group(0))
         # Root still runs the one script that installs into the distribution.
         self.assertIn("--user root", script)
-
-    def test_the_mobaxterm_search_only_accepts_a_mobaxterm_executable(self):
-        """An uninstall entry's DisplayIcon is whatever executable that program ships.
-
-        Scanning the uninstall registry without checking the file name handed the
-        terminal shortcut an unrelated program - Signal, on the machine this was found
-        on - because its DisplayIcon was simply the first candidate that existed.
-        """
-        script = (WINDOWS / "Install.ps1").read_text()
-        search = re.search(r"function Get-MobaXterm.*?\n}\n", script, re.S)
-        self.assertIsNotNone(search, "Get-MobaXterm is gone; the shortcut moved")
-        self.assertIn("-like 'MobaXterm*.exe'", search.group(0))
 
     def test_the_runtime_never_names_the_removed_installer_wrapper(self):
         """The wrapper went with the zip, so no message may send a user to it.
