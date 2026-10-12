@@ -234,6 +234,22 @@ function Get-MobaXterm {
     $candidates = @()
     $key = Get-Command MobaXterm.exe -ErrorAction SilentlyContinue
     if ($key) { $candidates += $key.Source }
+    # MobaXterm's own installer records its folder here, and leaves
+    # `InstallLocation` and `DisplayIcon` empty in its uninstall entry - so the
+    # registry scan below never finds it. Missing it is how a PC with MobaXterm
+    # installed was handed a second, downloaded copy instead: MobaXterm runs one
+    # instance per desktop, so the copy started by the icon handed its command to
+    # the MobaXterm already running, which ignored it, and the icon did nothing.
+    foreach ($hive in @(
+        'HKLM:\SOFTWARE\Mobatek\MobaXterm',
+        'HKLM:\SOFTWARE\WOW6432Node\Mobatek\MobaXterm',
+        'HKCU:\SOFTWARE\Mobatek\MobaXterm'
+    )) {
+        $entry = Get-ItemProperty $hive -ErrorAction SilentlyContinue
+        if (-not $entry) { continue }
+        $installed = $entry | Select-Object -ExpandProperty InstallDir -ErrorAction SilentlyContinue
+        if ($installed) { $candidates += (Join-Path $installed 'MobaXterm.exe') }
+    }
     foreach ($hive in @(
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -250,7 +266,18 @@ function Get-MobaXterm {
             if ($icon) { $candidates += ($icon -replace ',\d+$', '') }
         }
     }
-    $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\MobaXterm\MobaXterm.exe')
+    # The places an installation puts itself when the registry says nothing, the
+    # portable copy the installer may have downloaded earlier, and the folder
+    # MobaXterm keeps its own files in when it was installed per user.
+    foreach ($folder in @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\MobaXterm'),
+        (Join-Path $env:APPDATA 'MobaXterm')
+    )) {
+        $candidates += (Join-Path $folder 'MobaXterm.exe')
+    }
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if ($root) { $candidates += (Join-Path $root 'Mobatek\MobaXterm\MobaXterm.exe') }
+    }
     $candidates += (Get-ChildItem -Path $InstallRoot -Filter 'MobaXterm*.exe' -Recurse -ErrorAction SilentlyContinue |
         Select-Object -ExpandProperty FullName)
     # The uninstall registry is full of unrelated programs, and its DisplayIcon

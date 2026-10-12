@@ -340,10 +340,13 @@ installer, so its rules are explicit:
   fsmonitor off, and they pin the Windows checkout's origin to the Linux checkout's
   origin, which the installer verified and the agent cannot write - a repointed
   remote is refused instead of followed.
-- It refuses a checkout with unsaved changes, a checkout on any branch other than
-  `main` or `staging`, and a checkout whose origin does not match, leaving it
-  exactly as it was. It never pushes, discards a commit, rebases, or resolves a
-  conflict; a merge that would conflict is undone and reported.
+- It refuses a checkout with unsaved changes to tracked files, a checkout on any
+  branch other than `main` or `staging`, and a checkout whose origin does not
+  match, leaving it exactly as it was. It never pushes, discards a commit, rebases,
+  or resolves a conflict; a merge that would conflict is undone and reported.
+  Untracked files - a report or a skill the assistant has written and nobody has
+  committed yet - are left where they are and do not stop the update: Git refuses
+  by itself an update that would overwrite one, and that is reported, not resolved.
 - The Windows half of the update runs the same `pixi run --locked` task the Start
   llama.cpp icon runs, in the Windows checkout's own environment, and that remains
   the documented exception: the native model server, and this update of it, run

@@ -40,9 +40,10 @@ the environment), actual bubblewrap filesystem isolation, Git inside the sandbox
 inside succeeds, which is the documented consequence of a writable `.git`),
 CPU-versus-GPU backend selection and server process ownership/lifecycle with a
 fake local server. The branch rule is exercised against real repositories built on
-the spot: unpublished work survives the merge of `main` into `staging`, a dirty
-checkout, an unexpected branch and a repointed remote are refused with nothing
-changed, and a conflicting merge is undone instead of left half-applied.
+the spot: unpublished work survives the merge of `main` into `staging`, a checkout
+with unsaved changes to tracked files, an unexpected branch and a repointed remote
+are refused with nothing changed, an untracked report or skill does not block the
+update, and a conflicting merge is undone instead of left half-applied.
 Integration tests explicitly skip when namespaces are blocked.
 A green run on a machine that skips them proves nothing about bubblewrap; say so.
 
@@ -235,9 +236,11 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       `git-branches.sh`), the Windows checkout ends on `staging` with `main` merged
       into it, and the native llama.cpp environment is reinstalled from the updated
       manifest. A left-over local model is stopped first, and clicking **Start
-      llama.cpp** brings it back. Then the same icon with the Windows checkout
-      dirty, on another branch or pointed at a different remote: it refuses, says
-      why, changes nothing, and still leaves the model server build consistent.
+      llama.cpp** brings it back. Then the same icon with unsaved changes to
+      tracked files in the Windows checkout, on another branch, or pointed at a
+      different remote: it refuses, says why, changes nothing, and still leaves the
+      model server build consistent. Untracked files in `workspace/` - a report the
+      assistant has written and nobody has committed - do not stop it.
       Running the WSL half by hand from PowerShell
       (`wsl -d osint-ai -u root -e /bin/bash /usr/local/lib/osint-ai/update-installation.sh`)
       does the same work, and refuses to run as anything but root.

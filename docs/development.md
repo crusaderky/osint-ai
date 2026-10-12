@@ -186,7 +186,13 @@ The installer:
   third-party freeware under its own licence: check that licence before a
   commercial rollout or redistribution. When it is unavailable, the one terminal
   shortcut opens a plain `wsl.exe` console instead; there is no second shortcut to
-  choose between.
+  choose between. MobaXterm's *own* WSL sessions (the ones it imports for a
+  distribution) do not work with this one, and that is deliberate: MobaXterm runs a
+  Windows helper out of `%APPDATA%\MobaXterm` **inside** the distribution through
+  WSL interop to reach its window, and this distribution neither mounts the
+  Windows drives nor runs Windows binaries inside (see `docs/security.md`). The
+  **OSINT AI Terminal** shortcut runs `wsl.exe` on the Windows side, which needs
+  neither, and is the supported way in.
 - Creates desktop shortcuts: **OSINT AI Terminal** (MobaXterm tab, runs
   `osint-terminal` in the Linux checkout: it reports whether local inference
   answers, then starts the assistant),
