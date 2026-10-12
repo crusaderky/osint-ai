@@ -37,7 +37,7 @@ PROJECT_CONFIG = Path("/etc/osint-ai.json")
 SYSTEM_STATE = Path("/var/lib/osint-ai")
 STATE_SUBPATH = Path(".local") / "state" / "osint-ai"
 # Windows: `%LOCALAPPDATA%\\osint-ai` is what the Windows installer creates and
-# owns, next to the pixi binary and the portable MobaXterm it downloaded.
+# owns, next to the native pixi binary and the desktop icons it wrote.
 WINDOWS_STATE_SUBPATH = Path("osint-ai")
 # Used only when run from neither a checkout nor an installed WSL distribution.
 DEFAULT_PROJECT_ROOT = Path("/home/osint/osint-ai")

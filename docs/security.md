@@ -16,8 +16,8 @@ is guidance only.
    is for skeleton development only: pinning a reviewed release tag and verifying
    the signature of what is downloaded is the release gate still outside this
    skeleton. Ubuntu rootfs, Pixi binary (both the Linux and the Windows
-   one), every llama.cpp release asset the recipe installs on either platform, and
-   the optional MobaXterm download are SHA-256 verified. Apt/Conda/npm retain their
+   one) and every llama.cpp release asset the recipe installs on either platform
+   are SHA-256 verified. Apt/Conda/npm retain their
    upstream trust and supply-chain risks. A writable `.git` inside the sandbox
    (item 5) means a compromised or misled agent can alter this repository's
    history; the release pipeline must therefore pin by tag and verify the
@@ -260,9 +260,6 @@ is guidance only.
   sandbox, which is why the agent never needs a device node at all. On plain Linux
   and in WSL the optional local server still reaches the GPU outside bubblewrap as
   explicitly required.
-- MobaXterm is third-party software started by a desktop shortcut with a fixed
-  command. It is not part of the trust boundary, and its licence must be
-  reviewed before redistribution.
 
 ## Maintenance
 

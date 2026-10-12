@@ -170,7 +170,7 @@ A green CI run does **not** prove: the sandbox's mount layout, environment
 scrubbing or read-only program checkout (Pi really does start inside the pinned
 bubblewrap, but no job asserts what the namespace contains), Git inside the
 sandbox on a runner that blocks unprivileged user namespaces anyway, the
-Windows installer, WSL provisioning, reboot, DrvFS mounts, MobaXterm, desktop
+Windows installer, WSL provisioning, reboot, DrvFS mounts, desktop
 shortcuts, the firewall rule, the WSL-to-Windows link the assistant actually uses
 for local models, GPU offload or that a preset fits the user's PC (the smoke test
 proves CPU inference of one 350M test model; the Windows job proves the server
@@ -216,13 +216,13 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       naming that path, and `apt list --installed '*bubblewrap*'` answering nothing
       together prove it. A later `pixi r install` as the `osint` user reports
       `ok bubblewrap`, needs no password and changes nothing.
-- [ ] Desktop shortcuts work: **OSINT AI Terminal** opens MobaXterm, runs
+- [ ] Desktop shortcuts work: **OSINT AI Terminal** opens a console window, runs
       `osint-terminal` (reports whether local inference answers, then
-      `pixi r osint-pi-wsl`), and reaches the chat prompt. With inference stopped it
-      still reaches the chat, says no local server is running, and uses a hosted
-      model. When MobaXterm is absent or `-SkipMobaXterm` is used, the same single
-      shortcut opens a plain `wsl.exe` console instead, and no second terminal
-      shortcut is created. **OSINT AI Files** opens the checkout.
+      `pixi r osint-pi-wsl`), and reaches the chat prompt - and typing there reaches
+      Pi, which is what a full-screen terminal program needs. With inference stopped
+      it still reaches the chat, says no local server is running, and uses a hosted
+      model. No third-party terminal is downloaded, and no second terminal shortcut
+      is created. **OSINT AI Files** opens the checkout.
 - [ ] **Start llama.cpp** installs the environment on first use if needed, reports
       the Vulkan device (or the CPU fallback), and exits; **Stop llama.cpp** stops
       it. The installer already proved the link once: it starts the server, asks
@@ -248,9 +248,6 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       to the WSL adapter and the local subnet, and rerunning the installer reuses it
       without a new prompt. Declining that prompt leaves online models working and
       prints a message saying what to do - not a failed installation.
-- [ ] MobaXterm: an existing installation is reused, not duplicated. The download
-      is checksum verified, `-SkipMobaXterm` skips it, and a tampered download is
-      refused.
 - [ ] WSL termination/restart remounts `/mnt/osint-ai` before any Pixi
       invocation. A failed mount fails closed instead of writing to NTFS.
 - [ ] Chatbot starts in `/osint-ai/workspace`, the `workspace/` of the Windows
