@@ -171,10 +171,11 @@ is guidance only.
      tampered with.
 
    In both cases, with no working Vulkan device the same build starts on the CPU with
-   GPU offloading disabled, which changes performance, not the boundary. The
-   backend is recorded in the state directory's `server.json`, and the weights
-   llama.cpp downloads stay in the standard Hugging Face cache, outside every
-   sandbox.
+   GPU offloading disabled, which changes performance, not the boundary. Which one
+   it picked is printed in the window the server runs in, and nothing else is
+   recorded: a foreground server has no pid file and no log file, so it leaves no
+   state a later process could read. The weights llama.cpp downloads stay in the
+   standard Hugging Face cache, outside every sandbox.
 7. The normal WSL user is not a sudoer. The Windows owner can still enter the
    distro as root; protecting against the machine owner is not a goal.
 8. Delegation (pi-subagents) adds processes, not privileges. A child session is
@@ -221,9 +222,11 @@ is guidance only.
   WSL-user privileges, or normal Windows-user privileges for the natively running
   model server. `pixi r install` - including its AppArmor step, one of the few
   places the project asks for a password - `pixi r update-project`, the Windows
-  installer and the **Start llama.cpp** / **Stop llama.cpp** / **Update OSINT AI**
-  desktop icons are trusted human operations, not startup paths and never agent
-  tools. Both install scripts refuse to run when `OSINT_SANDBOX=1`, and the icons
+  installer and the **Start llama.cpp** / **Update OSINT AI** desktop icons are
+  trusted human operations, not startup paths and never agent tools.
+  **Start llama.cpp** is the most direct of them: it puts llama.cpp in the
+  foreground of a window the human opened, so that window is both the console and
+  the stop, and closing it is the only way to stop the server. Both install scripts refuse to run when `OSINT_SANDBOX=1`, and the icons
   run `pixi run --locked` so a manifest that drifted from `pixi.lock` fails instead
   of installing something else.
   `update-project` runs the newly pulled manifest's environment install.
@@ -267,7 +270,7 @@ Local inference is the `llamacpp-binary-vulkan` Pixi environment, not a root-own
 copy under `/opt`. On plain Linux and in WSL it belongs to the project root
 checkout, which is read-only inside the sandbox in WSL and writable in plain Linux
 because that checkout is also the program there - the human reviews the diff before
-running `pixi r update-project` or `pixi r start-server`. On the Windows deployment
+running `pixi r update-project` or `pixi r llamacpp`. On the Windows deployment
 it belongs to the **Windows** checkout, together with the natively installed Pixi,
 and rerunning the installer (the README's one-liner) is what refreshes it;
 `scripts/server.py`
@@ -275,11 +278,14 @@ resolves that checkout from `PIXI_PROJECT_ROOT`, which the desktop icon's `pixi 
 sets, so a stale or edited manifest is a reviewed change rather than a surprise.
 Downloaded weights are outside all of it: llama.cpp writes them to the standard
 Hugging Face cache under the user's home, which the sandbox does not mount.
-Inference state - pid file and log - is in `/var/lib/osint-ai` (WSL, pre-created),
-`~/.local/state/osint-ai` (plain Linux) or `%LOCALAPPDATA%\osint-ai` (Windows).
-Never "fix" this by running an agent-editable `pixi run start-server` inside
+Nothing else inference writes anywhere: a foreground server has no pid file and no
+log file, so there is no inference state directory in any deployment, and nothing
+to pre-create as root or to leave behind on uninstall.
+Never "fix" this by running an agent-editable `pixi run llamacpp` inside
 containment: `scripts/server.py` refuses when `OSINT_SANDBOX=1` and must keep
-refusing. Do not add passwordless
+refusing. Nothing in the project stops a server a human started: the **Update OSINT
+AI** wrapper refuses while `llama-server.exe` is running instead of killing it, and
+only the installer's own acceptance probe closes a server it started itself. Do not add passwordless
 sudo of a project script, do not load commands from the writable Windows checkout
 into `/etc/wsl.conf`, and do not point the boot helper at anything but
 `/etc/osint-ai.json`. Nothing updates an installed PC silently: the two update

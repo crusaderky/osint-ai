@@ -1,3 +1,0 @@
-#!/bin/bash -p
-set -euo pipefail
-exec /usr/bin/python3 -I /usr/local/lib/osint-ai/server.py stop "$@"

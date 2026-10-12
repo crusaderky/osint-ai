@@ -47,7 +47,7 @@ if [[ -d $root/.pixi/envs/llamacpp-binary-vulkan ]]; then
 fi
 printf '\nLinux deployment updated. Close and reopen the chatbot to use the new tools.\n'
 if [[ ! -d $root/.pixi/envs/llamacpp-binary-vulkan ]]; then
-    printf 'Local inference is not installed here. pixi r start-server installs it when you first need it.\n'
+    printf 'Local inference is not installed here. pixi r llamacpp installs it when you first need it.\n'
 fi
 if ((status == 2)); then
     printf 'The tools were updated, but something in the branch update above needs your attention.\n' >&2

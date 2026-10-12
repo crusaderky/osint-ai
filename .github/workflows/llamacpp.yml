@@ -23,8 +23,8 @@ permissions:
 
 # The unit suite never loads a model, and it cannot: it has no weights and no
 # server. This job is the other half - it starts the real inference server the
-# way a maintainer does, starts the real assistant through the sandbox launcher,
-# and asks it a question. It is a separate workflow because it downloads the
+# way a maintainer does - in the foreground, with its output on the screen -
+# starts the real assistant through the sandbox launcher, and asks it a question. It is a separate workflow because it downloads the
 # Vulkan llama.cpp build plus a few hundred MB of weights, which no other job
 # needs. The Windows half - the same build inside the Windows checkout, and the
 # assistant reaching it from inside WSL - is a job of its own in ci.yml, on a
@@ -130,8 +130,24 @@ jobs:
           path: ~/.cache/huggingface/hub
           key: llama-model-LFM2.5-350M-Q4_K_M
 
+      # The documented way to run llama.cpp: in the foreground, in its own window,
+      # with its output on that window's screen. A CI step has no window to keep
+      # open, so it is backgrounded here and its output goes to a file instead -
+      # without the redirect the step would never finish, because a background
+      # process holding the step's stdout keeps the pipe open.
       - name: Start local inference
-        run: pixi r start-server
+        run: |
+          set -e
+          pixi r llamacpp > llama-server.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8080/health | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
+              echo 'The server answers /health.'
+              break
+            fi
+            sleep 2
+          done
+          # The gate, not the loop above: a server that never answered fails here.
+          curl --fail --silent --show-error http://127.0.0.1:8080/health
 
       # Load the unit-test preset as its own step, before the assistant asks: a
       # cold run downloads the weights, and that wait belongs to a step that says
@@ -185,13 +201,28 @@ jobs:
           test -s pi-smoke.log
           test "$status" -eq 0
 
+      # Closing the window is the only stop there is now, so a restart is: close
+      # that window, open it again. `pkill -x` matches the program name, not a
+      # command line, so it cannot match the step that runs it.
       - name: Restart local inference
-        run: pixi r restart-server
+        run: |
+          set -e
+          pkill -x llama-server || true
+          for _ in $(seq 1 30); do
+            if ! curl -fsS --max-time 2 http://127.0.0.1:8080/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          pixi r llamacpp > llama-server-restart.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8080/health | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then break; fi
+            sleep 2
+          done
+          curl --fail --silent --show-error http://127.0.0.1:8080/health
 
       # The same question with the weights now cached, through a server that was
-      # restarted underneath it: this is what proves a restart leaves the preset
-      # reachable by name, with the server listing it unloaded and the request
-      # itself loading it again.
+      # closed and started again underneath it: this is what proves a fresh server
+      # still lists the preset by name, loads it when the request names it, and
+      # does not download it a second time.
       - name: pi Hello world after a restart
         if: steps.sandbox.outputs.ok == 'yes'
         run: |
@@ -201,20 +232,23 @@ jobs:
           test -s pi-smoke-restart.log
           test "$status" -eq 0
 
-      # Stop and dump on failure too: a server left running would keep the job
-      # alive, and the log is the only place the failure is explained. The dump
-      # tolerates a missing file, which is what a failure before the first start
-      # looks like - it must not become a second, confusing failure.
+      # Close it on failure too: a server left running would keep the job alive.
+      # On a real PC this is the user closing the llama.cpp window.
       - name: Stop local inference
         if: always()
-        run: pixi r stop-server
+        run: pkill -x llama-server || true
 
+      # The dump is the only place a failure is explained, because a foreground
+      # server writes to its window and this job has no window. It tolerates a
+      # missing file, which is what a failure before the first start looks like -
+      # it must not become a second, confusing failure.
       - name: Dump the inference log
         if: always()
         run: |
-          log="$HOME/.local/state/osint-ai/server-state/llama-server.log"
-          if [[ -f $log ]]; then
-            cat "$log"
-          else
-            echo "No inference log at $log."
-          fi
+          for log in llama-server.log llama-server-restart.log; do
+            if [[ -f $log ]]; then
+              cat "$log"
+            else
+              echo "No inference log at $log."
+            fi
+          done

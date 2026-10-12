@@ -19,6 +19,14 @@ it, and `/login` has to be run again afterwards. Model weights moved out of the
 state directory as well: they now live in the standard Hugging Face cache, so an
 old `models/` directory under `/var/lib/osint-ai` or
 `~/.local/state/osint-ai` is unused and can be deleted to reclaim the space.
+llama.cpp now runs in the foreground, in the window that started it, so
+`start-server`, `stop-server` and `restart-server` are gone, the **Stop
+llama.cpp** icon is gone, and inference keeps no pid file and no log file at all:
+an old `server-state/` directory under `/var/lib/osint-ai`,
+`~/.local/state/osint-ai` or `%LOCALAPPDATA%\osint-ai` is unused and can be
+deleted. An installation from before this change still has the old
+`start-server`/`stop-server`/`restart-server` commands in `/usr/local/bin` until
+the next **Update OSINT AI** or installer rerun replaces the installed launchers.
 
 ## Automated Linux tests
 
@@ -38,8 +46,10 @@ already there is not added twice, and the list is read from the checkout that ow
 the environment), actual bubblewrap filesystem isolation, Git inside the sandbox
 (that `git status` works from Pi's own directory, and that a commit from
 inside succeeds, which is the documented consequence of a writable `.git`),
-CPU-versus-GPU backend selection and server process ownership/lifecycle with a
-fake local server. The branch rule is exercised against real repositories built on
+CPU-versus-GPU backend selection, and the command line the runner hands to
+llama.cpp - asserted as the argv and the scrubbed child environment, and then
+actually run against a fake local server that has to answer `/health`. There is
+no lifecycle to test any more: no pid file, no log file, no fork, no `taskkill`. The branch rule is exercised against real repositories built on
 the spot: unpublished work survives the merge of `main` into `staging`, a checkout
 with unsaved changes to tracked files, an unexpected branch and a repointed remote
 are refused with nothing changed, an untracked report or skill does not block the
@@ -125,11 +135,12 @@ delegation.
 * **Native Windows inference** (`windows-latest`): installs Pixi and the locked
   `llamacpp-binary-vulkan` environment - the only environment that resolves for
   win-64, and the only place the win-64 half of the recipe is built - runs the
-  native `llama-server --version` and `--list-devices`, and then starts and stops a
-  real server through `_server`, which is the same controller and the same task the
-  desktop icons run. Nothing on Linux can substitute: the recipe builds a different
-  asset there, and the controller's Windows code path (no `fork`, no `fcntl`,
-  process identity from a creation time, `taskkill`) never executes on Linux. This
+  native `llama-server --version` and `--list-devices`, and then runs a real server
+  in the foreground through `_server`, which is the same task the Start icon runs:
+  it waits for `/health`, then closes the server the way closing the window would,
+  by naming `llama-server.exe`. Nothing on Linux can substitute: the recipe builds
+  a different asset there, and the runner's Windows code path (no `fork`, no `exec`,
+  a child attached to the console) never executes on Linux. This
   job never installs the `default` environment, because Pi does not run natively on
   Windows.
 
@@ -143,16 +154,20 @@ job that does install and run local inference on Linux:
 * **Local inference + assistant smoke test** (`ubuntu-latest`): installs the
   locked `default` and `llamacpp-binary-vulkan` environments, then runs the
   documented `pixi r install` - which loads the AppArmor profile the pinned
-  bubblewrap needs - and starts the real server with `pixi r start-server`. On a
-  GPU-less runner that proves the documented CPU fallback, because the Vulkan
-  backend is a shared object next to the executable and a machine with no Vulkan
-  device cannot load it, so the same build runs on the processor. It loads the
-  `LFM2.5-230M` preset - the one `models.ini` marks unit-test only - through
-  `/models/load` and waits for the status to say `loaded`, so the assistant's own
-  request is not the thing paying for a cold download. It then asks the real
+  bubblewrap needs - and starts the real server with `pixi r llamacpp`, the
+  documented foreground command. A CI step has no window to keep open, so the job
+  backgrounds it and redirects its output to a file; without that redirect the step
+  would never finish, because a background process holding the step's stdout keeps
+  the pipe open. On a GPU-less runner that proves the documented CPU fallback,
+  because the Vulkan backend is a shared object next to the executable and a machine
+  with no Vulkan device cannot load it, so the same build runs on the processor. It
+  loads the `LFM2.5-230M` preset - the one `models.ini` marks unit-test only -
+  through `/models/load` and waits for the status to say `loaded`, so the assistant's
+  own request is not the thing paying for a cold download. It then asks the real
   assistant, through `pixi r osint-pi` and therefore inside bubblewrap, for an
-  answer, restarts the server and asks again with the weights now cached, stops it,
-  and dumps the server log either way. A missing model, a dead server or a sandbox
+  answer, closes the server with `pkill -x llama-server` and starts it again, asks
+  the same question with the weights now cached, and dumps what the server printed
+  either way. A missing model, a dead server or a sandbox
   that cannot start fails the job; there is no unsandboxed `pi` in it, and no
   `--no-sandbox` flag to reach for.
   Where the runner refuses unprivileged user namespaces *outright* the profile
@@ -223,13 +238,19 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       it still reaches the chat, says no local server is running, and uses a hosted
       model. No third-party terminal is downloaded, and no second terminal shortcut
       is created. **OSINT AI Files** opens the checkout.
-- [ ] **Start llama.cpp** installs the environment on first use if needed, reports
-      the Vulkan device (or the CPU fallback), and exits; **Stop llama.cpp** stops
-      it. The installer already proved the link once: it starts the server, asks
-      `/health` from inside WSL at the address `sandbox.py --wsl --inference-url`
-      prints, and stops it. After that, a local model answers in the assistant
-      without any further setup, and `pixi r update-project` inside WSL does not
-      disturb it.
+- [ ] **Start llama.cpp** installs the environment on first use if needed, opens a
+      console window, reports the Vulkan device (or the CPU fallback) in it, and
+      keeps running there with the model server's own output on screen. Closing
+      that window stops the server: `tasklist` shows no `llama-server.exe`
+      afterwards, and the assistant then says no local server is running. There is
+      no Stop icon and no wrapper for one. The installer already proved the link
+      once: it starts the server, asks `/health` from inside WSL at the address
+      `sandbox.py --wsl --inference-url` prints, and closes the one it started.
+      After that, a local model answers in the assistant without any further setup,
+      and `pixi r update-project` inside WSL does not disturb it.
+- [ ] **Update OSINT AI** while a llama.cpp window is open: it refuses before it
+      changes anything, says to close that window first, and touches neither
+      checkout. Nothing in the project kills a server the human started.
 - [ ] **Update OSINT AI** on a PC that was installed from an older revision: the
       window reports the branch work, `/usr/local/lib/osint-ai` is refreshed from
       the Linux checkout (compare `ls -l` timestamps and the installed
@@ -315,13 +336,17 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       **OSINT AI Terminal** window does not steal the first window's intercom
       broker. After a restart, no message from the previous session is
       delivered. The socket is absent outside the sandbox.
-- [ ] No Vulkan device at all: **Start llama.cpp** reports the CPU fallback, exits
-      0, and a small model answers (slowly). Accept only a real answer, not
+- [ ] No Vulkan device at all: **Start llama.cpp** reports the CPU fallback in its
+      window, and a small model answers (slowly). Accept only a real answer, not
       `vulkaninfo` output.
 - [ ] Vulkan-capable GPU + driver (NVIDIA, AMD or Intel): **Start llama.cpp** names
-      a Vulkan device and the model really offloads. **Stop llama.cpp** and a second
-      **Start llama.cpp** are idempotent; an occupied port, a startup timeout and a
-      crash are reported with the log path; cached weights survive.
+      a Vulkan device and the model really offloads. Closing the window and starting
+      again is the restart: the second window refuses with "Port 8080 is in use"
+      while the first is still open, a crash is reported in the window itself, and
+      cached weights survive - the second start does not download them again.
+- [ ] On plain Linux, `pixi r llamacpp` holds its terminal, prints the model
+      server's output there, and Ctrl-C or closing that terminal stops it; the
+      assistant in another terminal keeps working and then reports no local server.
 - [ ] The server is reachable from inside WSL and from nowhere else: the assistant
       gets an answer from a local model, while another PC on the same LAN cannot
       open `http://<windows-host>:8080/health`. Removing the firewall rule breaks
@@ -334,10 +359,10 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       `C:\Users\<name>\osint-ai\.pixi\envs\llamacpp-binary-vulkan` is repaired by
       the next **Start llama.cpp** (that is what `pixi run --locked` does), while a
       manifest that no longer matches `pixi.lock` fails with a clear message.
-      On plain Linux `pixi r start-server` installs the environment into the
+      On plain Linux `pixi r llamacpp` installs the environment into the
       checkout as the current user, `pixi r update-project` updates it together
-      with the assistant's environment, `stop-server` installs nothing, and
-      `pixi r install` reports its absence without calling it MISSING.
+      with the assistant's environment, and `pixi r install` reports its absence
+      without calling it MISSING.
 - [ ] `pixi r update-project` on a WSL installation fast-forwards the Linux
       checkout's `main` and installs its environments; the next chatbot start uses
       the new tools. On plain Linux it ends on `staging` with `main` merged in, and

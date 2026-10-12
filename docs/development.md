@@ -178,10 +178,12 @@ The installer:
   the local subnet, so the assistant inside WSL can reach the server on Windows.
   It is the only reason the installer asks for permission a second time; a rule
   that is already current needs no prompt.
-- Proves that path: starts the server, asks its `/health` from inside the
-  distribution at the address `scripts/sandbox.py` resolves, then stops it. A
-  failure is reported, not fatal - local inference is optional - and online models
-  keep working.
+- Proves that path: starts the server in the foreground, asks its `/health` from
+  inside the distribution at the address `scripts/sandbox.py` resolves, then closes
+  it again - the installer's own probe is the only server it ever runs, and it
+  closes the one it started by naming the process, because a foreground server
+  keeps no pid file. A failure is reported, not fatal - local inference is
+  optional - and online models keep working.
 - Starts the assistant in a plain `wsl.exe` console window, through
   `osint-terminal` in the Linux checkout: that reports whether local inference
   answers, then starts the assistant. A console window gives the distribution a
@@ -189,8 +191,9 @@ The installer:
   or WSL-interop helper is involved (see `docs/security.md`).
 - Creates desktop shortcuts: **OSINT AI Terminal** (a console window running
   `osint-terminal`),
-  **Start llama.cpp** and **Stop llama.cpp** (the same `_server` task the Linux
-  deployment runs, in the Windows checkout's environment),
+  **Start llama.cpp** (the same `_server` task the Linux deployment runs, in the
+  Windows checkout's environment, in a console window that stays open while the
+  server runs and whose closure is what stops it),
   **Update OSINT AI** (see below) and
   **OSINT AI Files** (Windows checkout).
 - Preserves user state on a completed-install rerun, and reinstalls the
@@ -203,8 +206,8 @@ Uninstalling is manual and documented for users in the README. In short:
 `wsl --unregister osint-ai` deletes the private distribution and its disk, which
 holds the Pi credentials, sessions and settings, the Linux checkout and the
 root-owned launchers under `/usr/local`. Deleting `%LOCALAPPDATA\osint-ai` removes
-the native Pixi binary, the Windows inference environment, its state directory and
-the download cache. The downloaded weights are a third
+the native Pixi binary, the Windows inference environment and the wrapper the
+desktop icons run. The downloaded weights are a third
 place: `%USERPROFILE%\.cache\huggingface` on the Windows side, and
 `~/.cache/huggingface` for a plain Linux install. The inbound firewall rule the
 installer added is named `OSINT AI local inference`. The Windows checkout,
@@ -216,16 +219,18 @@ including `workspace/`, and everything pushed to GitHub survive all of that, and
 The **Update OSINT AI** shortcut is the one human-run update path, and it is never
 a startup or agent path. Its wrapper lives outside both checkouts
 (`%LOCALAPPDATA%\osint-ai\update-osint-ai.cmd`), so it cannot change with the
-commit a checkout happens to be on, and it runs three steps:
+commit a checkout happens to be on, and it refuses while a llama.cpp window is
+open - that window is holding the files the build replaces, and nothing in this
+project stops a server a human started - before it runs three steps:
 
 1. `windows/update-installation.sh` inside WSL, as root, which updates the Linux
    program checkout and its Pixi environments as the `osint` user, then reinstalls
    the root-owned runtime in `/usr/local` from that checkout
    (`windows/install-runtime.sh`), then updates the Windows checkout with the same
    branch dance as the user who owns it.
-2. The local model server is stopped, so that its build can be replaced.
-3. The native `llamacpp-binary-vulkan` environment of the Windows checkout is
-   installed from the updated manifest, with `--locked`.
+2. The native `llamacpp-binary-vulkan` environment of the Windows checkout is
+   installed from the updated manifest, with `--locked`. Nothing has to be stopped
+   first: llama.cpp is not running, because the user closed its window.
 
 Everything that writes to a checkout or an environment runs as `osint`, never as
 root: the Windows checkout's `.git` is writable by the assistant, and Git runs
@@ -286,18 +291,21 @@ one Pi runs on. Installing the assistant never pulls the llama.cpp build, and a 
 without it simply uses a hosted model. There is no separate install step:
 
 ```bash
-pixi r start-server         # deploys llamacpp-binary-vulkan if needed, then serves 127.0.0.1:8080
-pixi r osint-pi             # the assistant; /model lists what the server offers
+pixi r llamacpp             # deploys llamacpp-binary-vulkan if needed, then serves 127.0.0.1:8080
+                            # in *this* terminal, until you close it
+pixi r osint-pi             # in a second terminal: the assistant; /model lists what the server offers
 ```
 
-`start-server` and `restart-server` depend on `_server`, a task defined **in the
+`llamacpp` depends on `_server`, a task defined **in the
 `llamacpp-binary-vulkan` environment itself** (`[feature.llamacpp-binary-vulkan.tasks]`).
 Pixi installs an environment it is about to run a task in, so that is the whole
 deployment story: no install task, no wrapper script, no "is the binary there
-yet" check. `stop-server` needs no inference program and stays in the default
-environment; Windows, where the default environment does not resolve, runs
-`pixi run --locked -e llamacpp-binary-vulkan _server stop` from the Stop icon
-instead. `scripts/server.py` names its checkout through `PIXI_PROJECT_ROOT`
+yet" check. There is no `start-server`, `stop-server` or `restart-server` and no
+`_server` argument to pass: llama.cpp runs in the foreground, its output goes to
+the window that started it, and closing that window is the only stop. Windows,
+where the default environment does not resolve, runs
+`pixi run --locked -e llamacpp-binary-vulkan _server` from the Start icon instead.
+`scripts/server.py` names its checkout through `PIXI_PROJECT_ROOT`
 (set by Pixi), then `/etc/osint-ai.json` (the installed WSL copy), then the
 checkout above `scripts/`. In WSL that is the **Linux** checkout: the Windows
 checkout is the one the assistant edits, and on the Windows deployment it is the
@@ -305,11 +313,12 @@ checkout is the one the assistant edits, and on the Windows deployment it is the
 runs. Its manifest is as trusted as the human who reviewed it: see
 [security.md](security.md).
 
-The state directory is `/var/lib/osint-ai` when it exists (the WSL deployment
-pre-creates it), `%LOCALAPPDATA%\osint-ai` on Windows (beside the native Pixi
-binary the installer put there) and `~/.local/state/osint-ai` otherwise, so neither
-a plain Linux install nor the Windows one needs a root step for inference. Model
-weights are in none of them: llama.cpp uses the standard Hugging Face cache,
+Inference has no state directory at all. A foreground server writes to its own
+window, not to a log file, and nothing records its pid, so there is no
+`/var/lib/osint-ai`, no `~/.local/state/osint-ai/server-state` and no
+`%LOCALAPPDATA%\osint-ai\server-state` to create, own, keep in step or delete.
+Model weights are the only thing inference leaves on disk, and they are in
+llama.cpp's own default: the standard Hugging Face cache,
 `~/.cache/huggingface/hub` and `%USERPROFILE%\.cache\huggingface\hub` on Windows,
 outside the sandbox.
 
@@ -332,7 +341,6 @@ outside the sandbox.
 | `/home/osint/.pi/agent/models.json` | Generated each launch from `pixi-recipes/pi-home/models.json`, because the address of the local model server differs per deployment: loopback on Linux, the Windows host inside WSL, and WSL hands a new address out whenever it restarts |
 | `/home/osint/.pi/agent/intercom` | Per-launch tmpfs: the pi-intercom broker socket, PID file and queued mail |
 | `~/.cache/huggingface/hub`, `%USERPROFILE%\.cache\huggingface\hub` | Downloaded model weights: the standard Hugging Face cache, inference only and outside the sandbox, under the `osint` user's home in WSL and the same path on plain Linux, under the Windows user's profile for the native server. Shared with anything else on the PC that downloads from Hugging Face, so weights are not duplicated |
-| `/var/lib/osint-ai/server-state/`, `%LOCALAPPDATA%\osint-ai\server-state\` | Inference server log and pid file (the WSL deployment pre-creates the first; the native Windows server owns the second) |
 
 Inside the sandbox the agent works in a real Git checkout: it can read the whole
 history and, with `.git` writable, commit or discard work. Guidance puts it on
@@ -371,7 +379,7 @@ that still need Windows validation.
 | `pixi r osint-pi` | Assistant in `workspace/` of the current (Linux) checkout |
 | `pixi r osint-pi-wsl` | Assistant in `workspace/` of the Windows checkout |
 | `pixi r install` | Load the AppArmor profile Ubuntu needs for the pinned bubblewrap, then the installation check and usage summary |
-| `pixi r start-server` / `stop-server` / `restart-server` | Local inference outside the sandbox on `127.0.0.1:8080`, GPU with automatic CPU fallback. `start-server` and `restart-server` run in the `llamacpp-binary-vulkan` environment, which Pixi installs when it is missing; `stop-server` runs in the default environment and installs nothing |
+| `pixi r llamacpp` | Local inference outside the sandbox on `127.0.0.1:8080`, GPU with automatic CPU fallback, **in the foreground of the terminal that ran it**: its output is that window's output, and closing the window stops it. It runs in the `llamacpp-binary-vulkan` environment, which Pixi installs when it is missing. Run the assistant from a second terminal |
 | `pixi r update-project` | Trusted maintenance: fast-forwards `main`, fast-forwards `staging` and merges `main` into `staging` (`scripts/git-branches.sh`), then `pixi install --locked -e default` and the inference environment when it is installed |
 | `pixi r test` | Python test suite |
 
@@ -382,10 +390,10 @@ checkout it runs from, never anything a sandboxed agent could have modified.
 `update-project`, the Windows installer and the **Update OSINT AI** icon are
 deliberate, human-run operations. Never wire them into startup or into the sandbox.
 Inside WSL these commands are also installed as `osint-pi`, `osint-pi-wsl`,
-`osint-terminal`, `start-server`, `stop-server`, `restart-server` and
-`update-project`. `osint-terminal` is what the desktop shortcut runs; the Start and
-Stop llama.cpp icons run the Windows environment's `_server` task directly, because
-the server they control is not inside the distribution. The Update OSINT AI icon
+`osint-terminal` and `update-project`. `osint-terminal` is what the desktop
+shortcut runs; the **Start llama.cpp** icon runs the Windows environment's
+`_server` task directly, in its own console window, because the server it starts
+is not inside the distribution. The Update OSINT AI icon
 runs `update-project` for the Linux checkout, the runtime refresh and the Windows
 checkout's dance, then reinstalls the native llama.cpp environment from the
 wrapper outside both checkouts.
@@ -457,25 +465,30 @@ login does not authorize every web-search service. Provider accounts and billing
 are separate from this software.
 
 Local inference is the `llamacpp-binary-vulkan` environment, and it runs in two
-places depending on the deployment, with the same controller and the same presets.
+places depending on the deployment, with the same runner, the same foreground
+behaviour and the same presets.
 
 On plain Linux (and in WSL, if somebody installs the environment there)
-`pixi r start-server` launches it outside bubblewrap as the ordinary Linux user,
+`pixi r llamacpp` runs it outside bubblewrap as the ordinary Linux user,
 listening on `127.0.0.1:8080` in router mode with `models.ini` from the project
-root. Nothing in the Windows deployment needs that server - the icons and the
-assistant talk to the Windows one - but the same manifest and the same commands
-serve a plain Linux install, so they keep working there. The assistant cannot start
-any of it: `scripts/server.py` refuses when
-`OSINT_SANDBOX=1`, and neither the state directory nor the program checkout is
-writable inside the sandbox. Device detection asks the binary itself
+root, in the foreground of the terminal that asked for it: `os.execve` replaces
+that process with `llama-server`, so Ctrl-C reaches llama.cpp directly and its
+exit code is what the shell sees. Nothing in the Windows deployment needs that
+server - the icon and the assistant talk to the Windows one - but the same
+manifest and the same command serve a plain Linux install, so they keep working
+there. The assistant cannot start any of it: `scripts/server.py` refuses when
+`OSINT_SANDBOX=1`. Device detection asks the binary itself
 (`--list-devices`), so a Vulkan device is found however it is reached, and
-otherwise the same build starts on the CPU with GPU offloading disabled; the
-backend is recorded in `<state>/server-state/server.json`.
+otherwise the same build starts on the CPU with GPU offloading disabled; which
+one it picked is printed in that window.
 
 On the Windows deployment llama.cpp runs natively on Windows, outside WSL, because
 that is where the graphics driver is: the Windows installer installs Pixi and the
-same environment inside the Windows checkout, and the **Start llama.cpp** and
-**Stop llama.cpp** desktop icons run the same `_server` task. The server binds
+same environment inside the Windows checkout, and the **Start llama.cpp** desktop
+icon runs the same `_server` task in a console window of its own. Windows has no
+`exec`, so there the child is started *attached to that console*, which is exactly
+what makes closing the window stop the server; Ctrl-C is forwarded to it. The
+server binds
 `0.0.0.0` there - loopback inside WSL is a different machine - and the firewall
 rule the installer added admits only the WSL adapter's local subnet. Both the
 assistant's model list and Pi's own provider get the address from
@@ -522,7 +535,8 @@ Starting the server downloads no weights: llama.cpp loads a model, and downloads
 if necessary, when a request names it - which is also why the CI smoke test loads
 the preset explicitly before asking. Review presets against supported hardware:
 appearing in the list does not mean a model fits the user's GPU, RAM or patience.
-`stop-server` stops inference but retains cached models.
+Closing the llama.cpp window stops inference and keeps every cached model: the
+weights are llama.cpp's own cache, not something the server owns.
 
 `pi-subagents` lets the assistant hand a narrow job to a child session, and
 `pi-intercom` gives the sessions one channel to talk over. Both run inside the

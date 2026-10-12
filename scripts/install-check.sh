@@ -89,8 +89,9 @@ else
 fi
 
 # Local inference is optional and separate from the assistant. Plain Linux runs it
-# in this checkout's own Pixi environment, which `pixi r start-server` installs the
-# first time it is needed. The Windows deployment runs llama.cpp natively on
+# in this checkout's own Pixi environment, which `pixi r llamacpp` installs the
+# first time it is needed, in the foreground: a second terminal window, kept open
+# while the assistant works. The Windows deployment runs llama.cpp natively on
 # Windows instead, outside WSL, so there the question is whether that server
 # answers - the assistant talks to the Windows host, never to a server here.
 printf '\nLocal inference (optional)\n'
@@ -114,9 +115,9 @@ if ((wsl_deployment)); then
     url=$(/usr/bin/python3 -I "$launcher" --wsl --inference-url 2>/dev/null || true)
     url=${url:-http://127.0.0.1:8080}
     if health "$url"; then
-        say running "$url (llama.cpp runs on Windows; the desktop icons control it)"
+        say running "$url (llama.cpp runs on Windows, in its own window)"
     else
-        say stopped "nothing answers on $url. Use the 'Start llama.cpp' desktop icon."
+        say stopped "nothing answers on $url. Use the 'Start llama.cpp' desktop icon and keep its window open."
         printf '           If it still fails, the Windows firewall rule that admits the WSL network is\n           missing: rerun the Windows installer and approve the permission prompt.\n'
     fi
 else
@@ -126,10 +127,10 @@ else
         if health http://127.0.0.1:8080; then
             say running "127.0.0.1:8080. The assistant lists its models with /model."
         else
-            say stopped "start it with: pixi r start-server"
+            say stopped "start it in another terminal with: pixi r llamacpp"
         fi
     else
-        say optional "llama.cpp is not installed here yet. pixi r start-server installs it."
+        say optional "llama.cpp is not installed here yet. pixi r llamacpp installs it."
         printf '           Until then the assistant uses a hosted model: run it and type /login.\n'
     fi
 fi
@@ -140,11 +141,11 @@ say ok "credentials, sessions and settings: ${OSINT_STATE_DIR:-$HOME/.local/stat
 printf '\nStart it\n'
 if ((wsl_deployment)); then
     printf '  OSINT AI Terminal         desktop icon: the assistant, and whether local inference answers\n'
-    printf '  Start/Stop llama.cpp      desktop icons: local inference on the Windows side\n'
+    printf '  Start llama.cpp           desktop icon: local inference on the Windows side, in its own window\n'
     printf '  osint-pi-wsl              the assistant on its own\n'
 else
     printf '  pixi r osint-pi        assistant, working in %s/workspace (mounted at /osint-ai/workspace)\n' "$root"
-    printf '  pixi r start-server    local inference on 127.0.0.1:8080, which /model then lists\n'
+    printf '  pixi r llamacpp        local inference on 127.0.0.1:8080, in this window; /model then lists it\n'
 fi
 printf '\nSkills live in workspace/.agents/skills, that is /osint-ai/workspace/.agents/skills inside the assistant. The assistant edits them for you.\n'
 if ((missing)); then

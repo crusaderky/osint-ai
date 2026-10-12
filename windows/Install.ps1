@@ -98,6 +98,14 @@ function Invoke-Pixi([string]$Pixi, [string[]]$Arguments) {
     }
 }
 
+function Stop-NativeInference {
+    # A foreground server keeps no pid file, so the only way to name it is the
+    # program itself. The acceptance probe below starts a server to test the WSL
+    # path and must not leave one running behind.
+    Get-CimInstance -ClassName Win32_Process -Filter "Name = 'llama-server.exe'" -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
 function Set-InferenceFirewall {
     # WSL is a separate network namespace: reaching a server on Windows from inside
     # it is *inbound* traffic on the WSL virtual adapter, and Windows blocks that by
@@ -475,18 +483,27 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
     }
     $firewall = Set-InferenceFirewall
     $reachability = 'unreachable'
+    $probe = $null
+    $probeExit = $null
     try {
-        # Start it once, prove the assistant reaches it from inside WSL, then stop it:
-        # an installation that leaves a background server running would be a surprise.
-        Invoke-Pixi $pixi @('run', '--locked', '-e', 'llamacpp-binary-vulkan', '--manifest-path', $manifest, '_server', 'start')
+        # Start it once, prove the assistant reaches it from inside WSL, then close
+        # it again: an installation that left a server running would be a surprise,
+        # and from now on a running server is always a window the user opened.
+        # No new window, so llama.cpp's own output lands in this installer window.
+        $probe = Start-Process -FilePath $pixi -ArgumentList @(
+            'run', '--locked', '-e', 'llamacpp-binary-vulkan', '--manifest-path', $manifest, '_server'
+        ) -NoNewWindow -PassThru
         $reachability = Get-InferenceReachability
     } catch {
         Write-Host "Local inference did not start: $($_.Exception.Message)" -ForegroundColor Yellow
     } finally {
-        try {
-            Invoke-Pixi $pixi @('run', '--locked', '-e', 'llamacpp-binary-vulkan', '--manifest-path', $manifest, '_server', 'stop')
-        } catch {
-            Write-Host "Local inference was left running: $($_.Exception.Message)" -ForegroundColor Yellow
+        Stop-NativeInference
+        if ($probe) {
+            # The launcher exits by itself when llama.cpp does, and its exit code is
+            # the difference between "it never started" and "it runs but WSL cannot
+            # reach it". Only a server still holding the port has to be closed here.
+            if ($probe.HasExited) { $probeExit = $probe.ExitCode }
+            else { Stop-Process -Id $probe.Id -Force -ErrorAction SilentlyContinue }
         }
     }
     if ($reachability -eq 'ok') {
@@ -495,7 +512,11 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
         Write-Host 'This installation is older than this installer, so local inference could not be checked.' -ForegroundColor Yellow
         Write-Host 'Back up your project folder, then reinstall from scratch to finish the update (docs/development.md).'
     } else {
-        Write-Host 'The assistant could not reach local inference from inside WSL.' -ForegroundColor Yellow
+        if ($probeExit) {
+            Write-Host "The model server itself failed (exit $probeExit); its own output is above." -ForegroundColor Yellow
+        } else {
+            Write-Host 'The assistant could not reach local inference from inside WSL.' -ForegroundColor Yellow
+        }
         if (-not $firewall) {
             Write-Host 'Run the install command from the README again and approve the Windows permission prompt, or ask your IT team to allow inbound TCP 8080 from the WSL network.'
         } else {
@@ -503,40 +524,43 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
         }
         Write-Host 'Online models are unaffected.'
     }
-    # Plain wrappers, outside the checkout: the desktop icons stay identical no
+    # The Start icon runs llama.cpp in the foreground, in the console window this
+    # wrapper opens: that window is where the user watches a model load, and
+    # closing it is what stops the server. There is no Stop icon, and nothing to
+    # stop. A plain wrapper outside the checkout, so the icon stays identical no
     # matter which commit the Windows checkout is on.
     $startInference = Join-Path $InstallRoot 'start-inference.cmd'
-    $stopInference = Join-Path $InstallRoot 'stop-inference.cmd'
-    foreach ($pair in @(@($startInference, 'start'), @($stopInference, 'stop'))) {
-        $wrapper, $action = $pair
-        Set-Content -LiteralPath $wrapper -Encoding ASCII -Value @(
-            '@echo off',
-            'setlocal',
-            "`"$pixi`" run --locked -e llamacpp-binary-vulkan --manifest-path `"$manifest`" _server $action",
-            'if errorlevel 1 (',
-            '    echo.',
-            "    echo Local inference did not $action.",
-            '    echo The assistant still works with an online model; see the README.',
-            '    pause',
-            ')'
-        )
-    }
+    Set-Content -LiteralPath $startInference -Encoding ASCII -Value @(
+        '@echo off',
+        'setlocal',
+        'echo Starting the local model server. Keep this window open while you work.',
+        'echo Close this window, or press Ctrl-C, to stop it.',
+        'echo.',
+        "`"$pixi`" run --locked -e llamacpp-binary-vulkan --manifest-path `"$manifest`" _server",
+        'if errorlevel 1 (',
+        '    echo.',
+        '    echo Local inference stopped, or did not start. Read the message above.',
+        '    echo The assistant still works with an online model; see the README.',
+        '    pause',
+        ')'
+    )
 
     # The Update icon: one click brings the two checkouts up to date, refreshes the
-    # root-owned runtime inside WSL, and reinstalls the native llama.cpp build. A
-    # plain wrapper outside the checkout, like the two above, so it stays identical
-    # no matter which commit the Windows checkout is on.
+    # root-owned runtime inside WSL, and reinstalls the native llama.cpp build. It
+    # refuses while a llama.cpp window is open, because that window is holding the
+    # files the build replaces - nothing here stops a server the user started. A
+    # plain wrapper outside both checkouts, like the one above, so it stays
+    # identical no matter which commit the Windows checkout is on.
     $updateWrapper = Join-Path $InstallRoot 'update-osint-ai.cmd'
     Set-Content -LiteralPath $updateWrapper -Encoding ASCII -Value @(
         '@echo off',
         'setlocal',
+        'tasklist /FI "IMAGENAME eq llama-server.exe" | findstr /I /C:"llama-server.exe" >nul',
+        'if not errorlevel 1 goto running',
         'echo Updating OSINT AI. The newest program is fetched from GitHub.',
         'echo.',
         "wsl.exe -d $Distro -u root -e /bin/bash /usr/local/lib/osint-ai/update-installation.sh",
         'set "wsl_status=%ERRORLEVEL%"',
-        'echo.',
-        'echo Stopping the local model server so that its build can be replaced...',
-        "`"$pixi`" run --locked -e llamacpp-binary-vulkan --manifest-path `"$manifest`" _server stop",
         'echo.',
         'echo Updating the local llama.cpp build...',
         "`"$pixi`" install --locked -e llamacpp-binary-vulkan --manifest-path `"$manifest`"",
@@ -554,6 +578,10 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
         'goto end',
         ':failed',
         'echo The update did not finish. Read the messages above, fix what they name, then run Update OSINT AI again.',
+        'goto end',
+        ':running',
+        'echo Close the llama.cpp window first: it is using the files this update replaces.',
+        'goto end',
         ':end',
         'echo.',
         'pause'
@@ -573,16 +601,14 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
     $folder = $shell.CreateShortcut((Join-Path $desktop 'OSINT AI Files.lnk'))
     $folder.TargetPath = $ProjectPath
     $folder.Save()
-    # Local inference: llama.cpp runs on Windows, so these two icons are how the
-    # user starts and stops it. They run the same task the Linux deployment runs.
+    # Local inference: llama.cpp runs on Windows, so this one icon is how the user
+    # starts it, and it runs the same task the Linux deployment runs. It opens a
+    # console window that stays open while the server runs; closing that window is
+    # how the user stops it.
     $start = $shell.CreateShortcut((Join-Path $desktop 'Start llama.cpp.lnk'))
     $start.TargetPath = $startInference
-    $start.Description = 'Start the local AI model server that runs on Windows.'
+    $start.Description = 'Start the local AI model server that runs on Windows. Close this window to stop it.'
     $start.Save()
-    $stop = $shell.CreateShortcut((Join-Path $desktop 'Stop llama.cpp.lnk'))
-    $stop.TargetPath = $stopInference
-    $stop.Description = 'Stop the local AI model server.'
-    $stop.Save()
     # Updating the program: the checkouts, the runtime inside WSL and the local
     # model server. A deliberate click, never a startup path.
     $update = $shell.CreateShortcut((Join-Path $desktop 'Update OSINT AI.lnk'))
@@ -590,7 +616,7 @@ exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOS
     $update.Description = 'Fetch the newest OSINT AI program, and update the local model server.'
     $update.Save()
     Write-Host "`nReady. Open 'OSINT AI Terminal' and wait for the chatbot prompt."
-    Write-Host "Local models run on Windows itself: click 'Start llama.cpp', then choose one with /model. No GPU is required; without a Vulkan-capable one it uses the processor and is slower."
+    Write-Host "Local models run on Windows itself: click 'Start llama.cpp', keep that window open, then choose a model with /model. Close the window to stop the server. No GPU is required; without a Vulkan-capable one it uses the processor and is slower."
     Write-Host "For program updates click 'Update OSINT AI': it fetches the newest version into both checkouts and updates the local model server."
     Write-Host "Your skills are in $ProjectPath\workspace\.agents. Review and commit them in your Windows Git app."
 } catch {

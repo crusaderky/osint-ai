@@ -185,11 +185,29 @@ jobs:
           pixi run -e llamacpp-binary-vulkan llama-server --version
           pixi run -e llamacpp-binary-vulkan llama-server --list-devices
 
-      # The controller is the same file the desktop icons run. Its Windows code
-      # path - no fork, no fcntl, process identity from a creation time, taskkill -
-      # exists nowhere on Linux, and `_server start` only returns once the server
-      # answers /health, so this starts and stops a real server.
-      - name: Start and stop inference the way the desktop icons do
+      # The runner is the same file the desktop icon runs, on the platform only a
+      # Windows runner has: no fork and no exec, so the child is started attached
+      # to this console - which is what makes closing the window stop it. `_server`
+      # runs in the foreground, so this starts it the way a double click does,
+      # waits for the real server to answer /health, then closes it the way closing
+      # the window would.
+      - name: Run inference in the foreground the way the desktop icon does
+        shell: pwsh
         run: |
-          pixi run --locked -e llamacpp-binary-vulkan _server start
-          pixi run --locked -e llamacpp-binary-vulkan _server stop
+          $launcher = Start-Process -FilePath pixi -ArgumentList @('run', '--locked', '-e', 'llamacpp-binary-vulkan', '_server') -NoNewWindow -PassThru
+          $healthy = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            try {
+              $response = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri http://127.0.0.1:8080/health
+              if ($response.Content -match '"status"\s*:\s*"ok"') { $healthy = $true; break }
+            } catch {
+              Start-Sleep -Seconds 2
+            }
+          }
+          # Close it whatever the answer was: a server left running here would keep
+          # the step alive, exactly as it would hold a window open on a PC.
+          Get-CimInstance -ClassName Win32_Process -Filter "Name = 'llama-server.exe'" -ErrorAction SilentlyContinue |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          Stop-Process -Id $launcher.Id -Force -ErrorAction SilentlyContinue
+          if (-not $healthy) { Write-Host '::error::the server never answered /health.'; exit 1 }
+          Write-Host 'Checked: the foreground runner started a real server and closed it.'

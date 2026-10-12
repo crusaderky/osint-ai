@@ -1,7 +1,7 @@
 #!/bin/bash -p
 # Install the root-owned runtime of the Windows deployment into /usr/local.
 #
-# The sandbox launcher, the pi entry script, the server controller, the boot
+# The sandbox launcher, the pi entry script, the foreground llama.cpp runner, the boot
 # mount helper, the updater and the terminal commands are installed outside both
 # checkouts, so an installed PC runs the code it installed rather than whatever a
 # checkout happens to contain. This is the one list of those files. It is used by

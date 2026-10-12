@@ -54,8 +54,7 @@ It creates these desktop shortcuts:
 | Shortcut | Use it to… |
 | --- | --- |
 | **OSINT AI Terminal** | Open the assistant. Use this for everyday work. |
-| **Start llama.cpp** | Start the local model server, so the assistant can use models that run on this PC. |
-| **Stop llama.cpp** | Stop the local model server (not needed if you just shut down or restart your PC). |
+| **Start llama.cpp** | Run the local model server. It keeps running until you close the window. |
 | **Update OSINT AI** | Install the newest version of the program. |
 | **OSINT AI Files** | Open the project folder in File Explorer. Your research is in `workspace`. |
 
@@ -156,12 +155,12 @@ experimental.
 A gaming video card with 4GB memory or more is recommended. If you don't have one, the
 model should still run but it may be extremely slow.
 
-1. Double-click **Start llama.cpp** and wait for its window to close.
-2. Open the assistant, type `/model` and choose `MiniCPM5-2B (local)`.
+1. Double-click **Start llama.cpp**. A window opens, showing what the model is doing.
+   Keep it open.
+2. Open the assistant in its own window, type `/model` and choose `MiniCPM5-2B (local)`.
 3. The first prompt will download the model file (~1.6 GB). After the initial download,
    you won't need internet access anymore (as long as you work on local files only).
-4. When you're finished, in addition to closing the terminal, you should double-click on
-   **Stop llama.cpp**.
+4. When you're finished, close the llama.cpp window. This stops the server.
 
 ### Interact with the agent
 
@@ -349,7 +348,7 @@ Or you can ask it to investigate the git history for you:
 | Replies are slow | Try a different model with `/model`, or lower `/thinking` where supported. |
 | A new rule or skill is not recognised | Type `/reload`. If the problem persists, ask the assistant to investigate. |
 | A teammate's changes are missing | In GitHub Desktop, click **Fetch origin**, then **Pull origin**, then type `/reload`. |
-| MiniCPM5-2B doesn't load | Double-click **Start llama.cpp** and try again. If that window shows an error, share it with your maintainer. |
+| MiniCPM5-2B doesn't load | Double-click **Start llama.cpp**, keep its window open, and try again. If that window shows an error, share it with your maintainer. |
 | MiniCPM5-2B is extremely slow | You need a video card with at least 4GB RAM. This is separate from your main computer's RAM. |
 | The assistant is too stupid | Try a different model. |
 | The assistant is too stupid and the smarter models are too expensive | Refine AGENTS.md and the skill files to make them idiot-proof. It's a good idea to spend more for a smarter model to write better skill files, and then use a dumber model to read them. |
@@ -363,7 +362,8 @@ Uninstalling deletes saved AI sign-ins, chat history and downloaded models. It d
 delete your Windows project folder or anything already on GitHub.
 
 1. **Back up first.** Ensure that you left nothing important in the `workspace` folder.
-2. Close the terminal windows and delete the OSINT AI desktop shortcuts.
+2. Close the terminal windows, including the llama.cpp window if it is open, and
+   delete the OSINT AI desktop shortcuts.
 3. Open **PowerShell** from the Windows Start menu. Run:
 
    ```powershell
@@ -379,7 +379,8 @@ delete your Windows project folder or anything already on GitHub.
 
    **Do not run `wsl --uninstall` or unregister any other Linux system.**
 4. Press **Windows key + R**, enter `%LOCALAPPDATA%`, and delete the `osint-ai`
-   folder. If Windows says a file is in use, close the terminal and try again.
+   folder. If Windows says a file is in use, close the terminal and the llama.cpp
+   window and try again.
 5. Delete the downloaded local models, which are large: press **Windows key + R**,
    enter `%USERPROFILE%\.cache`, and delete the `huggingface` folder.
 6. Remove the Windows permission the installer added: open PowerShell
@@ -422,8 +423,8 @@ Open a terminal, then `cd` to the project directory.
 You have these commands available:
 
 - `pixi r osint-pi` to start the OSINT AI terminal inside the `workspace/` directory
-- `pixi r start-server` to start llama.cpp to run a local model
-- `pixi r stop-server` to stop llama.cpp to run a local model
+- `pixi r llamacpp` to run a local model. It runs in that terminal and prints what it
+  is doing. You need to open a second terminal and run `pixi r osint-pi` there.
 - `pixi r update-project` to get the latest software from the remote project on GitHub.
 
 ### Uninstall from Linux

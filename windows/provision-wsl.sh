@@ -38,19 +38,20 @@ if ! id osint >/dev/null 2>&1; then
 fi
 [[ $(id -u osint) == 1000 ]] || { echo 'Unexpected osint UID.' >&2; exit 1; }
 
-install -d -m 755 /usr/local/lib/osint-ai /var/lib/osint-ai
+install -d -m 755 /usr/local/lib/osint-ai
 # The root-owned runtime: the sandbox launcher, the pi entry script, the server
-# controller, the boot mount helper, the updater and the terminal commands, from
+# runner, the boot mount helper, the updater and the terminal commands, from
 # `scripts/` and `windows/`. One list, in windows/install-runtime.sh, because
 # every later run of the published installer and every click of the Update OSINT AI icon
 # installs the same set from the same place.
 /bin/bash "$HERE/install-runtime.sh" "$REPO"
-# Inference state only. The assistant's own state is not pre-created here: it
-# lives in the osint user's ~/.local/state/osint-ai, exactly as on plain Linux,
-# and scripts/sandbox.py creates it at 0700 on the first launch. Model weights are
-# not here either: llama.cpp keeps them in the standard Hugging Face cache under
-# the osint user's home.
-install -d -m 700 -o osint -g osint /var/lib/osint-ai/server-state
+# Nothing inference-related is pre-created here: llama.cpp runs in the foreground,
+# in a window the human opened, so it keeps no pid file and no log file. The
+# assistant's own state is not pre-created either: it lives in the osint user's
+# ~/.local/state/osint-ai, exactly as on plain Linux, and scripts/sandbox.py
+# creates it at 0700 on the first launch. Model weights are not here either:
+# llama.cpp keeps them in the standard Hugging Face cache under the osint user's
+# home.
 
 # The Linux checkout owns Git, the manifest and every Linux environment.
 if [[ -d $LINUX_PROJECT/.git && ! -L $LINUX_PROJECT/.git ]]; then
@@ -127,7 +128,7 @@ bash "$REPO/scripts/install-apparmor.sh"
 # Local inference is not installed here at all: on the Windows deployment llama.cpp
 # runs natively on Windows, outside WSL, where it reaches the GPU directly, and the
 # Windows installer installs it there. The Linux checkout still carries the same
-# environment for a plain Linux install, and `pixi r start-server` deploys it on
+# environment for a plain Linux install, and `pixi r llamacpp` deploys it on
 # demand if somebody wants a server inside the distribution.
 # Final acceptance check: the real launcher must reach Pi inside containment.
 # HOME is pinned so the agent home lands in the osint user's own state directory

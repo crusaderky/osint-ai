@@ -23,12 +23,11 @@ install-apparmor = "bash scripts/install-apparmor.sh"
 install-check = "bash scripts/install-check.sh"
 osint-pi = "bash scripts/bwrap-pi.sh --native"
 osint-pi-wsl = "bash scripts/bwrap-pi.sh --wsl"
-start-server = { depends-on = [{ task = "_server", environment = "llamacpp-binary-vulkan", args = ["start"] }] }
-restart-server = { depends-on = [{ task = "_server", environment = "llamacpp-binary-vulkan", args = ["restart"] }] }
-# Stopping needs no inference program, so it does not pull that environment.
-# Only the Linux deployment has a default environment: on Windows the Stop icon
-# runs `_server stop` in the inference environment instead.
-stop-server = "python -I scripts/server.py stop"
+# Local inference runs in the foreground, in the terminal that started it: no
+# start/stop/restart, no pid file, no log file. Its output is that window's
+# output, and closing the window is what stops it. On plain Linux that means a
+# second terminal window next to `osint-pi`.
+llamacpp = { depends-on = [{ task = "_server", environment = "llamacpp-binary-vulkan" }] }
 update-project = "bash scripts/update-project.sh"
 test = "python -m unittest discover -s tests -v"
 
@@ -66,15 +65,15 @@ platforms = ["linux-64-glibc234", "win-64"]
 
 [feature.llamacpp-binary-vulkan.dependencies]
 llama-cpp = { path = "pixi-recipes/llama-cpp-binary", flags = ["vulkan"] }
-# The controller that starts, health-checks and stops the server.
+# The runner that resolves the checkout, picks the backend and hands the terminal to llama-server.
 python = "=3.14"
 
 # Runs inside the inference environment: `python` and `llama-server` are that
 # environment's own, and Pixi has already installed them. Windows runs the same
-# task from a desktop shortcut: `pixi run -e llamacpp-binary-vulkan _server stop`
-# works when the default environment, which holds `stop-server`, is absent.
+# task from a desktop shortcut, because the default environment does not resolve
+# for win-64 at all.
 [feature.llamacpp-binary-vulkan.tasks]
-_server = { cmd = "python -I scripts/server.py {{ action }}", args = [{ arg = "action", default = "restart", choices = ["start", "stop", "restart"] }] }
+_server = "python -I scripts/server.py"
 
 [environments]
 # Default environment is for skill tools, separate from Pi's running runtime.

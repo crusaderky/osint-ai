@@ -1,5 +1,7 @@
 import base64
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -9,6 +11,7 @@ import stat
 import subprocess
 import tempfile
 import textwrap
+import time
 import tomllib
 import unittest
 from pathlib import Path
@@ -117,22 +120,26 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(tasks["osint-pi"], "bash scripts/bwrap-pi.sh --native")
         self.assertEqual(tasks["osint-pi-wsl"], "bash scripts/bwrap-pi.sh --wsl")
         # Local inference is optional and lives in its own environment, and the
-        # inference tasks run *in* that environment: that is how Pixi deploys it, so
+        # inference task runs *in* that environment: that is how Pixi deploys it, so
         # there is no install task to remember and no wrapper that checks whether
         # the program happens to exist.
         self.assertNotIn("install-server", tasks)
         self.assertNotIn("llamacpp", tasks["install"]["depends-on"])
-        inference = data["feature"]["llamacpp-binary-vulkan"]["tasks"]["_server"]
-        self.assertEqual(inference["cmd"], "python -I scripts/server.py {{ action }}")
+        self.assertEqual(
+            data["feature"]["llamacpp-binary-vulkan"]["tasks"]["_server"],
+            "python -I scripts/server.py",
+        )
         self.assertIn("python", data["feature"]["llamacpp-binary-vulkan"]["dependencies"])
-        for name, action in (("start-server", "start"), ("restart-server", "restart")):
-            dependency = tasks[name]["depends-on"][0]
-            self.assertEqual(dependency["task"], "_server", name)
-            self.assertEqual(dependency["environment"], "llamacpp-binary-vulkan", name)
-            self.assertEqual(dependency["args"], [action], name)
-        # Stopping needs no inference program, so it must not pull that environment.
-        self.assertEqual(tasks["stop-server"], "python -I scripts/server.py stop")
-        for task in ("install", "start-server", "stop-server", "update-project", "test"):
+        # One task, no arguments: llama.cpp runs in the foreground, so there is
+        # nothing to start, stop or restart, and the dependency on the inference
+        # environment is the whole deployment story.
+        dependency = tasks["llamacpp"]["depends-on"][0]
+        self.assertEqual(dependency["task"], "_server")
+        self.assertEqual(dependency["environment"], "llamacpp-binary-vulkan")
+        self.assertNotIn("args", dependency)
+        for name in ("start-server", "stop-server", "restart-server"):
+            self.assertNotIn(name, tasks, name)
+        for task in ("install", "llamacpp", "update-project", "test"):
             self.assertIn(task, tasks)
         # `pixi r install` is the one task that makes the sandbox runnable: it
         # loads the profile Ubuntu needs for the pinned bubblewrap, then proves
@@ -219,9 +226,11 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("pixi r install", workflow)
         self.assertIn("environments: default llamacpp-binary-vulkan", workflow)
         self.assertIn("locked: true", workflow)
-        self.assertIn("pixi r start-server", workflow)
-        self.assertIn("pixi r restart-server", workflow)
-        self.assertIn("pixi r stop-server", workflow)
+        self.assertIn("pixi r llamacpp", workflow)
+        # Foreground means the job has to close the server itself, and it does it
+        # by program name: a command-line pattern would match the step that runs
+        # the pattern.
+        self.assertIn("pkill -x llama-server", workflow)
         self.assertIn("pixi r osint-pi -- --model LFM2.5-230M", workflow)
         # Loading the preset is its own step, before the assistant asks: a cold
         # run downloads the weights, and that wait belongs to an explicit load
@@ -230,7 +239,9 @@ class ConfigurationTests(unittest.TestCase):
         # The server loads a model when a request names it (`--models-autoload` in
         # scripts/server.py) but nothing at startup, so a load can also be asked
         # for explicitly - and the workflow polling for it must not be the thing
-        # that loads it.
+        # that loads it. And because the server runs in the foreground, the job
+        # redirects its output instead of leaving the step waiting on the pipe.
+        self.assertIn("pixi r llamacpp > llama-server.log 2>&1 &", workflow)
         controller = (SCRIPTS / "server.py").read_text()
         self.assertIn('"--models-autoload"', controller)
         self.assertNotIn("--no-models-autoload", controller)
@@ -239,7 +250,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("run: pi ", workflow)
         self.assertNotIn("pixi run pi ", workflow)
         self.assertNotIn("--no-sandbox", workflow)
-        # A failure has to be explainable: the server log is dumped either way.
+        # A failure has to be explainable: what the server printed is dumped
+        # either way, because a foreground server has no log file of its own.
         self.assertIn("if: always()", workflow)
         self.assertIn("llama-server.log", workflow)
         # Never end a step with `exit 0`. The job's shell is a *login* shell, and
@@ -267,16 +279,19 @@ class ConfigurationTests(unittest.TestCase):
         """The win-64 half is only real on a Windows runner.
 
         ci.yml installs the inference environment there - the only environment
-        that resolves for win-64 - runs the native binary, and starts and stops a
-        real server through the same controller the desktop icons run. None of
-        that can be proved on Linux, where the recipe builds a different asset and
-        the controller takes the POSIX code path.
+        that resolves for win-64 - runs the native binary, and runs a real server
+        in the foreground through the same task the desktop icon runs, then closes
+        it. None of that can be proved on Linux, where the recipe builds a
+        different asset and the runner takes the POSIX code path.
         """
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("runs-on: windows-latest", ci)
         self.assertIn("pixi install --locked -e llamacpp-binary-vulkan", ci)
-        self.assertIn("_server start", ci)
-        self.assertIn("_server stop", ci)
+        self.assertIn("_server", ci)
+        # Foreground on Windows means a child attached to this console, so closing
+        # it is what stops the server; the job has to name the process instead.
+        self.assertIn("Name = 'llama-server.exe'", ci)
+        self.assertIn("http://127.0.0.1:8080/health", ci)
         # The assistant's own environment must never be installed on Windows: Pi
         # runs inside WSL, and `default` does not resolve for win-64 at all.
         self.assertNotIn("environments: default llamacpp-binary-vulkan", ci)
@@ -350,10 +365,11 @@ class ConfigurationTests(unittest.TestCase):
         downloads models with another tool then had two copies, and a plain Linux
         checkout kept hundreds of MB under its private state. The fix is to pass
         HOME and no cache variable at all - llama.cpp's own fallback
-        (`common/hf-cache.cpp`) is the standard path - and to keep the state
-        directory for the pid file and the log. Asserting the absence of the
-        redirect is the real test; pinning the path here would only be a second
-        copy of llama.cpp's default to keep in step.
+        (`common/hf-cache.cpp`) is the standard path. There is no inference state
+        directory at all now: a foreground server writes to its window, not to a
+        log file. Asserting the absence of the redirect is the real test; pinning
+        the path here would only be a second copy of llama.cpp's default to keep
+        in step.
         """
         controller = (SCRIPTS / "server.py").read_text()
         for name in (
@@ -397,21 +413,23 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("[[ -d $WINDOWS_MOUNT ]]", script)
         self.assertNotIn("[[ -d $WINDOWS_CHECKOUT ]]", script)
 
-    def test_provisioning_creates_only_inference_state(self):
-        """The Windows installer must not pre-create the assistant's state.
+    def test_provisioning_pre_creates_no_state_at_all(self):
+        """Nothing about a run is pre-created by the Windows installer.
 
-        Its agent home lives in the `osint` user's own `~/.local/state/osint-ai`,
-        created by the launcher at 0700 like everywhere else. A root-created copy
-        under `/var/lib` is how the two deployments drift apart.
+        The assistant's agent home lives in the `osint` user's own
+        `~/.local/state/osint-ai`, created by the launcher at 0700 like everywhere
+        else; a root-created copy under `/var/lib` is how the two deployments drift
+        apart. And llama.cpp now runs in the foreground, in a window the human
+        opened, so it has no pid file and no log file to make a directory for
+        either.
         """
         script = (WINDOWS / "provision-wsl.sh").read_text()
-        self.assertIn(
-            "install -d -m 700 -o osint -g osint /var/lib/osint-ai/server-state", script
-        )
+        self.assertNotIn("/var/lib/osint-ai", script)
+        self.assertNotIn("server-state", script)
         self.assertNotIn("agent-home", script)
         # Model weights are in the standard Hugging Face cache under the osint
         # user's home: not root-owned state under /var/lib.
-        self.assertNotIn("models", script)
+        self.assertNotIn("models/", script)
 
     def test_the_runtime_is_installed_from_one_file_list(self):
         """One list of root-owned files, used by every path that installs them.
@@ -1105,7 +1123,10 @@ class ConfigurationTests(unittest.TestCase):
             "'install', '--locked', '-e', 'llamacpp-binary-vulkan', '--manifest-path', $manifest",
             script,
         )
-        self.assertIn("'-e', 'llamacpp-binary-vulkan', '--manifest-path', $manifest, '_server'", script)
+        self.assertIn(
+            "'run', '--locked', '-e', 'llamacpp-binary-vulkan', '--manifest-path', $manifest, '_server'",
+            script,
+        )
         # One rule, bound to the WSL interface and the local subnet, so the rest of
         # the network still cannot reach the model server. Removing it first keeps a
         # rerun idempotent, and an unchanged rule needs no prompt at all.
@@ -1120,10 +1141,20 @@ class ConfigurationTests(unittest.TestCase):
         # server from inside WSL - loopback is a different machine there.
         self.assertIn("Get-InferenceReachability", script)
         self.assertIn("sandbox.py --wsl --inference-url", script)
-        # Both desktop icons run the same task the Linux deployment runs.
+        # One icon, and it runs the same task the Linux deployment runs. llama.cpp
+        # stays in that console window: closing the window is the stop, so there is
+        # no Stop icon and no wrapper for it.
         self.assertIn("'Start llama.cpp.lnk'", script)
-        self.assertIn("'Stop llama.cpp.lnk'", script)
-        self.assertIn("_server $action", script)
+        self.assertIn('"$manifest`" _server"', script)
+        self.assertNotIn("'Stop llama.cpp.lnk'", script)
+        self.assertNotIn("stop-inference.cmd", script)
+        # Nothing the installer runs stops a server the user started: the update
+        # refuses while llama.cpp holds the files it is about to replace, and only
+        # the installer's own probe closes a server, by program name.
+        self.assertIn('tasklist /FI "IMAGENAME eq llama-server.exe"', script)
+        self.assertIn("Close the llama.cpp window first", script)
+        self.assertIn("function Stop-NativeInference", script)
+        self.assertIn("Get-CimInstance -ClassName Win32_Process", script)
         # One reviewed pixi release for both sides of the installation.
         windows_pin = re.search(r"\$PixiVersion = '([\d.]+)'", script).group(1)
         wsl_pin = re.search(r"^PIXI_VERSION=([\d.]+)$", (WINDOWS / "provision-wsl.sh").read_text(), re.M)
@@ -1149,6 +1180,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("Start llama.cpp", terminal)
         # It must not quietly run a second, useless server inside the distribution.
         self.assertNotIn("restart-server", terminal)
+        self.assertNotIn("_server", terminal)
 
 
 class MountTests(unittest.TestCase):
@@ -1663,7 +1695,7 @@ class InstallCheckTests(unittest.TestCase):
         self.assertTrue(lines, result.stdout)
         for line in lines:
             self.assertNotIn("MISSING", line)
-            self.assertIn("pixi r start-server", line)
+            self.assertIn("pixi r llamacpp", line)
 
     def test_an_installed_inference_environment_is_reported_with_its_port(self):
         root = self.fixture()
@@ -2783,37 +2815,45 @@ http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
-        self.state = root / "state"
-        self.state.mkdir()
         self.argv_log = root / "argv.json"
         self.env_log = root / "env.json"
         runtime = root / "runtime"
         (runtime / "bin").mkdir(parents=True)
-        (root / "models.ini").write_text("version = 1\n")
+        self.presets = root / "models.ini"
+        self.presets.write_text("version = 1\n")
         self.binary = runtime / "bin/llama-server"
         self.has_gpu = True
         self.write_fake()
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
-            port = listener.getsockname()[1]
+            self.port = listener.getsockname()[1]
+        self.calls = []
         for name, value in [
             ("RUNTIME", runtime),
-            ("STATE_ROOT", root),
-            ("STATE", self.state),
-            ("PRESETS", root / "models.ini"),
-            ("PORT", port),
-            ("STARTUP_TIMEOUT", 3),
+            ("ROOT", root),
+            ("PRESETS", self.presets),
+            ("PORT", self.port),
         ]:
             patcher = patch.object(server, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        # `serve` is the one place this controller hands the terminal to llama.cpp,
+        # and on POSIX it does that by replacing the process outright. Recording
+        # what it was handed is what the terminal would have run, and it keeps this
+        # test process alive to assert on it.
+        patcher = patch.object(server, "serve", self.recorded_serve)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         patcher = patch.dict(os.environ, {}, clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
         patcher = patch.object(server.os, "geteuid", return_value=1000)
         patcher.start()
         self.addCleanup(patcher.stop)
-        self.addCleanup(self.stop)
+
+    def recorded_serve(self, command, env):
+        self.calls.append((command, env))
+        return 0
 
     def write_fake(self, *, has_gpu=None):
         if has_gpu is not None:
@@ -2825,52 +2865,128 @@ http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
         )
         self.binary.chmod(0o755)
 
+    def start(self):
+        """Run the controller the way the terminal does; return (command, env).
+
+        What it prints goes to the window it runs in, so it is captured here
+        instead of spewing into the test output: one test reads it back.
+        """
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            self.assertEqual(server.main(), 0)
+        self.said = buffer.getvalue()
+        return self.calls[-1]
+
+    def expect_error(self, pattern):
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaisesRegex(RuntimeError, pattern):
+                server.main()
+
     def recorded_argv(self):
         return json.loads(self.argv_log.read_text())
 
-    def record(self):
-        return json.loads((self.state / "server.json").read_text())
+    def answers(self):
+        """Ask /health, and say no while nothing has answered yet.
 
-    def stop(self):
-        pidfile = self.state / "server.json"
-        if pidfile.exists():
-            record = json.loads(pidfile.read_text())
-            server.stop(record, pidfile)
-            try:
-                os.waitpid(record["pid"], 0)
-            except ChildProcessError:
-                pass
+        The whole response is read, not the first packet: a minimal HTTP server
+        writes the status line, the headers and the body as separate writes, so one
+        recv can legitimately return headers alone.
+        """
+        try:
+            with socket.create_connection(("127.0.0.1", self.port), timeout=2) as sock:
+                sock.sendall(b"GET /health HTTP/1.0\r\n\r\n")
+                chunks = []
+                while True:
+                    data = sock.recv(4096)
+                    if not data:
+                        break
+                    chunks.append(data)
+                return b'"status":"ok"' in b"".join(chunks)
+        except OSError:
+            return False
 
-    def test_start_idempotence_and_stop(self):
-        server.main("start")
-        record = self.record()
-        self.assertEqual(record["backend"], "vulkan")
-        self.assertTrue(server.healthy())
-        server.main("start")
-        self.assertEqual(self.record(), record)
-        server.main("stop")
-        self.assertFalse((self.state / "server.json").exists())
-        self.assertFalse(server.owned_process(record))
-        os.waitpid(record["pid"], 0)
-        # No TIME_WAIT-induced false "port occupied" after stopping.
-        server.main("start")
-        self.assertTrue(server.healthy())
+    def test_the_terminal_says_what_a_window_means(self):
+        """The user has to know this window is the server, not a launcher."""
+        self.start()
+        self.assertIn("Keep this terminal open", self.said)
+        self.assertIn("Ctrl-C", self.said)
+        self.assertIn(f"127.0.0.1:{self.port}", self.said)
 
-    def test_gpu_layers_are_left_alone_on_a_gpu(self):
-        server.main("start")
-        self.assertNotIn("--n-gpu-layers", self.recorded_argv())
+    def test_the_terminal_gets_the_command_and_nothing_else(self):
+        """llama.cpp runs here: same window, same stdout, no arguments of its own."""
+        command, _ = self.start()
+        self.assertEqual(command[0], str(self.binary))
+        self.assertEqual(command[command.index("--models-preset") + 1], str(self.presets))
+        self.assertEqual(command[command.index("--host") + 1], "127.0.0.1")
+        self.assertEqual(command[command.index("--port") + 1], str(self.port))
+        self.assertNotIn("--n-gpu-layers", command)
+
+    def test_nothing_is_detached_and_nothing_is_left_behind(self):
+        """No service, no pid file, no log file: the window *is* the process table.
+
+        The old controller forked, wrote a pid file, polled /health and kept a log
+        under a state directory, which is what made start and stop separate commands
+        and a stopped server a thing that could be reported. Now the answer to "is
+        it running?" is the window in front of the user, so none of that survives -
+        and nothing here may quietly reintroduce a background server.
+        """
+        self.start()
+        controller = (SCRIPTS / "server.py").read_text()
+        for name in (
+            "server.json",
+            "llama-server.log",
+            "os.fork",
+            "setsid",
+            "fcntl",
+            "msvcrt",
+            "taskkill",
+            "DETACHED_PROCESS",
+            "CREATE_NEW_PROCESS_GROUP",
+        ):
+            self.assertNotIn(name, controller, name)
+        # No state directory of any kind: not under /var/lib, not under the user's
+        # state directory, not in the checkout.
+        self.assertNotIn("STATE", controller)
+        self.assertEqual(list(Path(self.temp.name).glob("**/server-state")), [])
+
+    def test_the_recorded_command_starts_a_server_that_answers(self):
+        """The command line is a real one: run it and ask it."""
+        command, env = self.start()
+        # What the server printed is the only explanation a failure has, exactly as
+        # it is the only explanation in the window on a real PC.
+        noise = Path(self.temp.name) / "server-output.txt"
+        seen = open(noise, "wb")
+        child = subprocess.Popen(command, env=env, stdout=seen, stderr=subprocess.STDOUT)
+        # Added in this order so the child is reaped before its output file closes.
+        self.addCleanup(seen.close)
+        self.addCleanup(child.wait)
+        try:
+            for _ in range(200):
+                if self.answers():
+                    break
+                code = child.poll()
+                if code is not None:
+                    raise self.failureException(
+                        f"the recorded command exited ({code}): {noise.read_text()}"
+                    )
+                time.sleep(0.1)
+            else:
+                raise self.failureException(
+                    f"the recorded command never answered /health: {noise.read_text()}"
+                )
+        finally:
+            child.terminate()
 
     def test_weights_live_in_the_default_hugging_face_cache(self):
-        """Weights land in `~/.cache/huggingface/hub`, not in private state.
+        """Weights land in `~/.cache/huggingface/hub`, not in a private state tree.
 
-        The child environment is scrubbed and passes HOME alone: no
-        `LLAMA_CACHE`, `HF_HUB_CACHE`, `HUGGINGFACE_HUB_CACHE`, `HF_HOME` or
-        `XDG_CACHE_HOME` may appear there, because each of them outranks HOME in
-        llama.cpp's resolution and would move the weights somewhere the user will
-        not look. The state directory keeps the pid file and the log.
+        The child environment is scrubbed and passes HOME alone: no `LLAMA_CACHE`,
+        `HF_HUB_CACHE`, `HUGGINGFACE_HUB_CACHE`, `HF_HOME` or `XDG_CACHE_HOME` may
+        appear there, because each of them outranks HOME in llama.cpp's resolution
+        and would move the weights somewhere the user will not look.
         """
-        server.main("start")
-        env = json.loads(self.env_log.read_text())
+        _, env = self.start()
         for name in ("LLAMA_CACHE", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "HF_HOME", "XDG_CACHE_HOME"):
             self.assertNotIn(name, env, name)
         # HOME is what makes llama.cpp pick the standard path; without it there is
@@ -2878,25 +2994,16 @@ http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
         home = env.get("HOME")
         self.assertTrue(home, "the inference environment must pass HOME")
         self.assertTrue((Path(home) / ".cache").is_absolute())
-        self.assertFalse((server.STATE_ROOT / "models").exists())
 
-    def test_restart_replaces_the_running_server(self):
-        server.main("start")
-        first = self.record()["pid"]
-        server.main("restart")
-        second = self.record()["pid"]
-        self.assertNotEqual(first, second)
-        self.assertTrue(server.healthy())
-        os.waitpid(first, 0)
+    def test_gpu_layers_are_left_alone_on_a_gpu(self):
+        self.start()
+        self.assertNotIn("--n-gpu-layers", self.recorded_argv())
 
     def test_no_vulkan_device_falls_back_to_cpu(self):
         """Detection asks the binary, so a plain Linux PC is judged the same way."""
         self.write_fake(has_gpu=False)
-        server.main("start")
-        self.assertEqual(self.record()["backend"], "cpu")
-        argv = self.recorded_argv()
-        self.assertEqual(argv[argv.index("--n-gpu-layers") + 1], "0")
-        self.assertTrue(server.healthy())
+        command, _ = self.start()
+        self.assertEqual(command[command.index("--n-gpu-layers") + 1], "0")
 
     def test_vulkan_build_without_a_device_falls_back_to_cpu(self):
         """A device probe that succeeds and names no Vulkan device is still CPU."""
@@ -2904,65 +3011,41 @@ http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
             "#!/usr/bin/python3\nimport sys\n"
             'if "--list-devices" in sys.argv:\n'
             '    print("Available devices:\\n  CPU")\n    sys.exit(0)\n'
-            "import http.server, json\n"
-            "class H(http.server.BaseHTTPRequestHandler):\n"
-            "    def do_GET(self):\n"
-            "        self.send_response(200); self.end_headers()\n"
-            '        self.wfile.write(b\'{"status":"ok"}\')\n'
-            "    def log_message(self, *a): pass\n"
-            "port = int(sys.argv[sys.argv.index('--port') + 1])\n"
-            "http.server.HTTPServer(('127.0.0.1', port), H).serve_forever()\n"
+            "sys.exit(0)\n"
         )
         self.binary.chmod(0o755)
-        server.main("start")
-        self.assertEqual(self.record()["backend"], "cpu")
-        self.assertTrue(server.healthy())
-
-    def test_stale_pid_is_not_owned(self):
-        self.assertFalse(server.owned_process({"pid": os.getpid(), "start": "wrong"}))
-        self.assertFalse(server.owned_process({"pid": 1, "start": None}))
+        command, _ = self.start()
+        self.assertEqual(command[command.index("--n-gpu-layers") + 1], "0")
 
     def test_occupied_port_is_not_accepted(self):
+        """A foreground server has no pid file to ask, so the port is the question."""
         with socket.socket() as listener:
-            listener.bind(("127.0.0.1", server.PORT))
+            listener.bind(("127.0.0.1", self.port))
             listener.listen()
-            with self.assertRaisesRegex(RuntimeError, "another process"):
-                server.main("start")
-
-    def test_startup_timeout_cleans_up(self):
-        self.binary.write_text(
-            "#!/usr/bin/python3\nimport sys,time\n"
-            'if "--list-devices" in sys.argv: print("Vulkan0: test")\n'
-            "else: time.sleep(30)\n"
-        )
-        with patch.object(server, "STARTUP_TIMEOUT", 0.3):
-            with self.assertRaisesRegex(RuntimeError, "startup timed out"):
-                server.main("start")
-        self.assertFalse((self.state / "server.json").exists())
+            self.expect_error("is in use")
 
     def test_agent_cannot_use_server_controller(self):
         with patch.dict(os.environ, {"OSINT_SANDBOX": "1"}):
-            with self.assertRaisesRegex(RuntimeError, "outside Pi"):
-                server.main("start")
+            self.expect_error("outside Pi")
 
-    def test_startup_crash_removes_pidfile(self):
-        self.binary.write_text(
-            '#!/bin/sh\nif [ "$1" = --list-devices ]; then echo "Vulkan0: test"; else exit 7; fi\n'
+    def test_root_cannot_start_it(self):
+        with patch.object(server.os, "geteuid", return_value=0):
+            self.expect_error("not root")
+
+    def test_arguments_are_refused_and_models_ini_is_named(self):
+        """`_server` takes no action any more, so a stale call must fail loudly."""
+        result = subprocess.run(
+            ["/usr/bin/python3", "-I", str(SCRIPTS / "server.py"), "stop"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        with self.assertRaisesRegex(RuntimeError, "Server exited"):
-            server.main("start")
-        self.assertFalse((self.state / "server.json").exists())
-
-    def test_stop_without_any_state_says_so(self):
-        """`stop-server` works on a PC that never had local inference."""
-        with patch.object(server, "STATE", Path(self.temp.name) / "no-state"):
-            server.main("stop")
-        self.assertFalse((Path(self.temp.name) / "no-state").exists())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("models.ini", result.stderr)
 
     def test_missing_presets_are_named(self):
         with patch.object(server, "PRESETS", Path(self.temp.name) / "gone.ini"):
-            with self.assertRaisesRegex(RuntimeError, "Model presets are missing"):
-                server.main("start")
+            self.expect_error("Model presets are missing")
 
     def test_the_runtime_is_the_checkout_environment(self):
         """Local inference is one optional Pixi environment in the project root."""
@@ -2992,23 +3075,12 @@ http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
             ):
                 self.assertEqual(server.project_root(), Path("/home/osint/osint-ai"))
 
-    def test_state_follows_the_user_state_directory_without_var_lib(self):
-        """A plain Linux checkout needs no root-created /var/lib directory."""
-        with tempfile.TemporaryDirectory() as temporary:
-            missing = Path(temporary) / "var-lib-osint-ai"
-            with patch.object(server, "SYSTEM_STATE", missing), patch.dict(
-                os.environ, {"OSINT_STATE_DIR": str(Path(temporary) / "state")}, clear=True
-            ):
-                self.assertEqual(server.state_root(), Path(temporary) / "state")
-
     def test_a_missing_inference_environment_names_the_install(self):
         """Optional means the answer is a command, not 'complete the installation'."""
         with patch.object(server, "RUNTIME", Path(self.temp.name) / "not-installed"):
-            with self.assertRaisesRegex(RuntimeError, "llamacpp-binary-vulkan"):
-                server.main("start")
+            self.expect_error("llamacpp-binary-vulkan")
         with patch.object(server, "RUNTIME", Path(self.temp.name) / "not-installed"):
-            with self.assertRaisesRegex(RuntimeError, "optional"):
-                server.main("start")
+            self.expect_error("optional")
 
 
 if __name__ == "__main__":

@@ -73,13 +73,12 @@ Linux user running it (`/home/osint/.local/state/osint-ai/agent-home` in WSL,
 created by the launcher at `0700`) are the same everywhere. Do not reintroduce a
 WSL-only state directory such as `/var/lib/osint-ai/agent-home`: that is how a
 sign-in, a session or a setting ends up where the other deployment never looks.
-`/var/lib/osint-ai` holds inference state where the WSL deployment pre-created it;
-a plain Linux checkout keeps the same `server-state/` directory in the user's own
-`~/.local/state/osint-ai`, because asking for a password to make a state directory
-is how a second, half-installed layout appears. The Windows deployment's inference
-state is neither: llama.cpp runs natively there, so its pid file and log are in
-`%LOCALAPPDATA%\osint-ai\server-state`. Downloaded weights are in none of them:
-llama.cpp writes them to the standard Hugging Face cache, `~/.cache/huggingface/hub`
+Inference keeps no state directory in either deployment: llama.cpp runs in the
+foreground, in the window that started it, so it writes no pid file and no log file
+and there is nothing to pre-create, own or keep in step - which is also why no
+inference install step ever needs a password. The only thing it leaves on disk is
+downloaded weights, and those are in llama.cpp's own default, the standard Hugging
+Face cache: `~/.cache/huggingface/hub`
 under the Linux user and `%USERPROFILE%\.cache\huggingface\hub` on Windows, so
 another Hugging Face tool on that PC shares them instead of downloading a second
 copy.
@@ -87,12 +86,16 @@ copy.
 Local inference is the one thing the two deployments do differently, and it is the
 reason the manifest resolves a second platform. On plain Linux and in WSL the
 server is a Pixi environment in the Linux checkout
-(`llamacpp-binary-vulkan`), which `pixi r start-server` installs on demand. On
+(`llamacpp-binary-vulkan`), which `pixi r llamacpp` installs on demand. On
 Windows it runs **natively on Windows**, outside the virtual machine, where the
 GPU driver is a Windows driver: the Windows installer installs Pixi natively too,
 installs the same environment in the Windows checkout (`.pixi/envs/llamacpp-binary-vulkan`
-there), and creates the **Start llama.cpp** and **Stop llama.cpp** desktop icons,
-which run the same `_server` task the Linux side runs. An assistant inside WSL
+there), and creates the **Start llama.cpp** desktop icon, which runs the same
+`_server` task the Linux side runs. Both deployments run it **in the foreground**:
+its stdout is the terminal's or the console window's, and closing that window is
+the only way to stop it. On plain Linux that means the user opens a second terminal
+for `pixi r osint-pi`; on Windows the llama.cpp console window stays open while
+local models are available. An assistant inside WSL
 reaches that server through the WSL network - the Windows host is the guest's
 default gateway, which `scripts/sandbox.py` resolves and exports as `LLAMA_BASE_URL`
 and `OSINT_INFERENCE_URL` - and reaching it at all needs an inbound Windows
@@ -121,7 +124,7 @@ pixi r test                 # python unittest suite; run before declaring anythi
 pixi r osint-pi             # chatbot in workspace/ of this checkout (plain Linux)
 pixi r osint-pi-wsl         # chatbot in workspace/ of the Windows checkout
 pixi r install              # make the pinned bubblewrap allowed to run, then report what is missing
-pixi r start-server         # local inference on 127.0.0.1:8080, running in the llamacpp-binary-vulkan environment that Pixi installs; CPU fallback when no Vulkan device available
+pixi r llamacpp           # local inference on 127.0.0.1:8080 in the llamacpp-binary-vulkan environment that Pixi installs; CPU fallback when no Vulkan device available. It runs in the foreground of this terminal and prints what it is doing, so run the assistant from a second terminal; Ctrl-C or closing the terminal stops it
 pixi r update-project       # trusted: fast-forward main, fast-forward staging and merge main into it (scripts/git-branches.sh), then pixi install --locked -e default (and inference when installed)
 ```
 
@@ -129,21 +132,25 @@ For code maintenance you run Pi yourself, unsandboxed, in this checkout:
 `pixi shell -e default` and then `pi`. That is different from the sandboxed
 assistant, which always works in `workspace/`.
 
-`pixi r osint-pi*` and `pixi r *-server` are thin wrappers: they exec the
+`pixi r osint-pi*` is a thin wrapper: it execs the
 root-owned launcher when it is installed, and enter bubblewrap before Pi starts.
-The bubblewrap they enter is the one this checkout's locked environment installs
+The bubblewrap it enters is the one this checkout's locked environment installs
 (`.pixi/envs/default/bin/bwrap`), never `/usr/bin/bwrap`: the containment is
 pinned by `pixi.lock` and updated by `update-project` with everything else, so a
 change to it is a manifest change reviewed like any other.
 
 Local inference has no install task of its own and no wrapper script. It is a
 locked dependency in the separate `llamacpp-binary-vulkan` environment, and
-`start-server` and `restart-server` depend on `_server`, a task defined in that
-environment (`[feature.llamacpp-binary-vulkan.tasks]`), so Pixi installs the
-environment because it is about to run a task in it. `stop-server` stays in the
-default environment and installs nothing; the Windows desktop icons run
-`_server start` / `_server stop` in the inference environment instead, because the
-default environment does not resolve for win-64. Do not add a task a user has to
+`llamacpp` depends on `_server`, a task defined in that environment
+(`[feature.llamacpp-binary-vulkan.tasks]`), so Pixi installs the environment
+because it is about to run a task in it. `_server` takes no argument: there is no
+start, stop or restart to ask for, because `scripts/server.py` hands the terminal
+to `llama-server` (`os.execve` on POSIX, a console-attached child on Windows) and
+returns only when the server stops. The Windows icon runs the same `_server` task
+in the inference environment directly, because the default environment does not
+resolve for win-64. Do not reintroduce a pid file, a log file, a control lock or a
+`stop` command: the window is the process table, and a background server is exactly
+what this design removed. Do not add a task a user has to
 remember before the first start, and do not write a script that asks whether the
 inference binary happens to exist - inside that task Pixi already guarantees it.
 
@@ -198,7 +205,8 @@ dependencies; it must ask instead.
   commands so a manifest that does not match the lock fails instead of quietly
   installing something else. The **Update OSINT AI** icon is the one update path an
   installed PC has, and it is held to the same rule: human-started, never a startup
-  path, root only for `/usr/local` and the Windows mount, every checkout and
+  path, refuses while a llama.cpp window is open instead of killing the server the
+  human started, root only for `/usr/local` and the Windows mount, every checkout and
   environment written as `osint`, the Windows checkout's origin pinned to the Linux
   checkout's, its Git hooks, fsmonitor and pager switched off, and a checkout with
   unsaved changes to tracked files, another branch or a split history refused

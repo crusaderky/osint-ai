@@ -3,9 +3,10 @@
 # chatbot.
 #
 # This deployment runs llama.cpp natively on Windows, outside the distribution, so
-# this script cannot start it - the Start llama.cpp desktop icon does, and the
-# assistant reaches it through the WSL network. A missing server must not stop the
-# assistant: it starts on a hosted model instead.
+# this script cannot start it - the Start llama.cpp desktop icon does, in a window
+# of its own that has to stay open, and the assistant reaches it through the WSL
+# network. A missing server must not stop the assistant: it starts on a hosted
+# model instead.
 set -uo pipefail
 root=${OSINT_LINUX_PROJECT:-/home/osint/osint-ai}
 if [[ -r /etc/osint-ai.json ]]; then
@@ -19,7 +20,8 @@ url=${url:-http://127.0.0.1:8080}
 if curl -fsS --max-time 2 "$url/health" 2>/dev/null | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'; then
     printf 'Local inference is running on %s.\n' "$url"
 else
-    printf 'Local inference is not running. Use the "Start llama.cpp" desktop icon.\n'
+    printf 'Local inference is not running. Use the "Start llama.cpp" desktop icon and\n'
+printf 'keep its window open while you work.\n'
     printf 'The assistant uses an online model until then; see the README.\n'
 fi
 pixi r osint-pi-wsl || {
