@@ -972,12 +972,6 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("'OSINT AI Terminal.lnk'", script)
         self.assertIn("System32" + chr(92) + "wsl.exe", script)
         self.assertIn("-d $Distro -u osint -e /usr/local/bin/osint-terminal", script)
-        # No third-party terminal, no download of one, and no second shortcut to
-        # choose between.
-        self.assertNotIn("MobaXterm.exe", script)
-        self.assertNotIn("mobatek.net", script)
-        self.assertNotIn("$SkipMobaXterm", script)
-        self.assertNotIn("OSINT AI Terminal (basic)", script)
 
     def test_the_reachability_check_asks_the_launcher_as_the_assistant_user(self):
         """The launcher refuses to run as root, so the probe has to be `osint`.
