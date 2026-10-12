@@ -289,6 +289,21 @@ into `/etc/wsl.conf`, and do not point the boot helper at anything but
 paths are a human clicking **Update OSINT AI** on Windows and a human running
 `pixi r update-project` on Linux.
 
+### What the installer runs before it installs anything
+
+The README's one-liner is the published `main` copy of `windows/Install.ps1`, but
+the code it then runs - `windows/provision-wsl.sh`, `windows/install-runtime.sh`
+and everything under `scripts/` - is read out of the Windows checkout it was
+pointed at, which the installer leaves on `staging`. It therefore brings that
+checkout forward *before* installing from it, with the same
+`scripts/git-branches.sh` the Update OSINT AI icon runs: `main` fast-forwarded,
+`staging` fast-forwarded and given `main`. It installs nothing when that helper
+refuses - unsaved work, a branch that moved on in two places, a merge that would
+conflict, or an origin that is not the one the installer was given - so a first
+installation can never run provisioning from a checkout that was left behind.
+That helper runs as root here, because the `osint` user does not exist yet, with
+`safe.directory` for that one checkout; every later update runs it as `osint`.
+
 ### What the Update OSINT AI icon may do
 
 The root-owned runtime under `/usr/local` is installed once outside both

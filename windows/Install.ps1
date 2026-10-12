@@ -369,48 +369,53 @@ try {
     $script = @'
 set -euo pipefail
 
-# Git for the checkout the user and the assistant work in. The assistant may
-# write only on the one development branch, `staging`, so every run of this
-# installer leaves that checkout on `staging`, up to date with origin, without
-# touching anything unpublished.
+# Git for the checkout the user and the assistant work in. Every run of this
+# installer leaves that checkout on `staging`, the one branch the assistant may
+# commit to, and brings the published `main` into it first: the code this
+# installation runs - provisioning, the runtime, the guided sandbox - is read out
+# of that checkout, so it must be installed from after the last publish and not
+# from before it.
 windows_git=(git -c safe.directory=/mnt/osint-ai -C /mnt/osint-ai)
-sync_staging() {
+sync_branches() {
     if [[ ! -d /mnt/osint-ai/.git || -L /mnt/osint-ai/.git ]]; then
-        echo 'No Git checkout is mounted; the staging branch was not checked out.' >&2
+        echo 'No Git checkout is mounted; it was not brought up to date.' >&2
         return 1
     fi
-    origin=$("${windows_git[@]}" remote get-url origin)
-    [[ "$origin" == "$REPOSITORY" ]] || {
-        echo 'Existing checkout has a different origin; refusing to overwrite it.' >&2
-        return 1
-    }
     # `clone --branch` fetches one branch only, which would also hide `staging`
     # from the assistant's own `git fetch`. Ask for every branch, on every run.
     "${windows_git[@]}" remote set-branches origin '*' || return 1
-    if ! GIT_TERMINAL_PROMPT=0 "${windows_git[@]}" fetch --quiet --prune origin; then
-        "${windows_git[@]}" show-ref --verify --quiet refs/heads/staging || {
-            echo 'Could not reach origin and this checkout has no staging branch. Check your network, or fetch the staging branch in your Git app, then run the install command from the README again.' >&2
-            return 1
-        }
-        echo 'Could not reach origin; using the staging branch already in this checkout.' >&2
+    # The rule itself is scripts/git-branches.sh, the same helper the Update
+    # OSINT AI icon runs: fetch, fast-forward `main`, fast-forward `staging`, merge
+    # `main` into `staging` - and refuse, changing nothing, rather than resolve a
+    # conflict, discard a commit or leave a detached checkout. There is no second
+    # copy of that rule here on purpose: a second, weaker copy is how this
+    # installer came to install a checkout that had never been brought forward.
+    if [[ ! -f /mnt/osint-ai/scripts/git-branches.sh ]]; then
+        echo 'This checkout has no scripts/git-branches.sh, so the program could not be brought up to date before it was installed. Update the checkout in your Windows Git app, then run the install command from the README again.' >&2
+        return 1
     fi
-    if "${windows_git[@]}" show-ref --verify --quiet refs/heads/staging; then
-        "${windows_git[@]}" checkout --quiet staging || {
-            echo 'Uncommitted changes block switching to the staging branch. Commit them in your Git app, then run the install command from the README again.' >&2
-            return 1
-        }
-    else
-        "${windows_git[@]}" checkout --quiet -b staging origin/staging || {
-            echo 'The repository has no staging branch yet. Ask the maintainer to publish it, then run the install command from the README again.' >&2
-            return 1
-        }
+    # `safe.directory`: this runs as root, before the `osint` user exists, against
+    # a checkout on a DrvFS mount that Git does not consider root's own. Its exit
+    # status matters: 2 means it did what it could but something above needs a
+    # human, and a checkout in that state is not installed from either.
+    status=0
+    GIT_TERMINAL_PROMPT=0 \
+        GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0=safe.directory \
+        GIT_CONFIG_VALUE_0=/mnt/osint-ai \
+        /bin/bash -p /mnt/osint-ai/scripts/git-branches.sh /mnt/osint-ai "$REPOSITORY" \
+        || status=$?
+    if ((status != 0)); then
+        echo 'The checkout was not brought fully up to date, so nothing was installed from it. Fix what it named above, then run the install command from the README again.' >&2
+        return 1
     fi
-    if [[ -n $("${windows_git[@]}" status --porcelain) ]]; then
-        echo 'Uncommitted changes are kept; the staging branch was left as it is.'
-    else
-        "${windows_git[@]}" merge --ff-only origin/staging ||
-            echo 'Your staging branch and the one on GitHub have both moved on; push or merge them in your Git app.' >&2
-    fi
+    # That helper also fast-forwards a checkout whose repository has no `staging`
+    # branch at all and says so; the assistant works on `staging`, so that is a
+    # refusal here, not a state to install from.
+    "${windows_git[@]}" show-ref --verify --quiet refs/heads/staging || {
+        echo 'The repository has no staging branch yet. Ask the maintainer to publish it, then run the install command from the README again.' >&2
+        return 1
+    }
     return 0
 }
 
@@ -423,7 +428,7 @@ if config['windows_project'] != sys.argv[1]:
     sys.exit('This distro belongs to another project folder; refusing to reconfigure it.')
 PY
     /usr/local/lib/osint-ai/mount-workspace.py
-    sync_staging || exit 1
+    sync_branches || exit 1
     # The root-owned runtime is installed once, so a PC that predates a change
     # keeps running what it installed until something refreshes it. Prefer the
     # Linux checkout: the sandbox mounts it read-only and the assistant cannot
@@ -486,9 +491,10 @@ else
     echo 'Project folder is not empty and is not the expected Git checkout. Choose an empty folder.' >&2
     exit 1
 fi
-# The assistant must never commit to `main`, so the checkout is put on `staging`
-# before provisioning reads anything out of it, and before the agent can start.
-sync_staging || exit 1
+# The assistant must never commit to `main`, so the checkout is brought up to
+# date and put on `staging` before provisioning reads anything out of it, and
+# before the agent can start.
+sync_branches || exit 1
 exec /bin/bash /mnt/osint-ai/windows/provision-wsl.sh "$WINDOWS_PROJECT" "$REPOSITORY" "$REF" "$LINUX_PROJECT"
 '@
     # Prefix escaped assignments once; never run chained replacements over user input.

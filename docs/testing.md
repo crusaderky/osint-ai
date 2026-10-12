@@ -194,6 +194,13 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
 - [ ] First install, interrupted install retry, and completed-install rerun
       preserve both checkouts and user state. Paths with spaces, apostrophes and
       non-ASCII work.
+- [ ] Every install brings the Windows checkout forward before installing from it:
+      `main` fast-forwarded, `staging` fast-forwarded and given `main`, through the
+      same `scripts/git-branches.sh` the Update icon runs, ending on `staging`. A
+      checkout on an old revision is updated this way - the installer never
+      provisions from a stale copy of itself - and unsaved work, a divergence, a
+      conflicting merge or a mismatched origin stop the install with nothing
+      installed and nothing changed (never a half-installed distribution).
 - [ ] NTFS selected; OneDrive/junction/UNC paths fail clearly. A private GitHub
       clone prepared by a Windows GUI is reused without importing credentials
       into WSL.

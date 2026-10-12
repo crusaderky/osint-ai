@@ -866,16 +866,28 @@ class ConfigurationTests(unittest.TestCase):
         self.assertNotIn("--unregister", script)
         self.assertNotIn("reset --hard", script)
         self.assertNotIn("git pull", script)
-        # The checkout the assistant commits from is put on the one development
-        # branch, and only ever fast-forwarded: unpublished work survives, and a
-        # divergence is reported instead of resolved.
-        self.assertIn("remote set-branches origin '*'", script)
-        self.assertIn("checkout --quiet staging", script)
-        self.assertIn("checkout --quiet -b staging origin/staging", script)
-        self.assertIn("merge --ff-only origin/staging", script)
+        # The checkout the assistant commits from is brought forward before
+        # anything is installed from it, because provisioning, the runtime files
+        # and the guided sandbox are all read out of it. The rule itself is not
+        # written down a second time here: the installer runs the same helper the
+        # Update OSINT AI icon runs, so both end on `staging` with `main` merged in
+        # and both refuse, changing nothing, instead of resolving a conflict or
+        # discarding unpublished work. A second, weaker copy of the rule in this
+        # file is how the installer came to install a checkout that had never been
+        # brought forward.
+        self.assertIn(
+            '/bin/bash -p /mnt/osint-ai/scripts/git-branches.sh /mnt/osint-ai "$REPOSITORY"',
+            script,
+        )
+        self.assertIn(
+            "remote set-branches origin '*'", script
+        )  # every branch, or the helper cannot see staging
+        self.assertIn('GIT_CONFIG_KEY_0=safe.directory', script)
+        self.assertNotIn("merge --ff-only", script)
         self.assertNotIn("checkout main", script)
+        self.assertNotIn("checkout --quiet staging", script)
         self.assertNotIn("git switch", script)
-        self.assertEqual(script.count("sync_staging || exit 1"), 2, "every path must sync")
+        self.assertEqual(script.count("sync_branches || exit 1"), 2, "every path must sync")
         # A completed installation refreshes the root-owned runtime from the
         # checkout the human installed, so a PC that predates a change is updated
         # instead of being told to reinstall.
