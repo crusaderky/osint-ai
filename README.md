@@ -116,13 +116,13 @@ models (outside of the shortlist) will drain $5 in less than a minute!
 The shortlist is up to date as of **10 October 2026** and it will change over time as
 better and cheaper models appear:
 
-| Model | Suggested thinking level | Where it runs | Ballpark cost for a 1h session |
-| --- | --- | --- | --- |
-| `deepseek-v4.1-flash` | high or max | OpenRouter | $1.00 |
-| `mimo-v2.6-pro` | high | OpenRouter | $0.90 |
-| `glm-5.3-flash` | high **(not max)** | OpenRouter | $0.66 |
-| `mimo-v2.6-flash` | high | OpenRouter | $0.30 |
-| `MiniCPM5-2B` | n/a | your PC | $0.01 (electricity) |
+| Model | Suggested thinking level | Where it runs | Ballpark cost for a 1h session | Notes |
+| --- | --- | --- | --- | --- |
+| `glm-5.3-flash` | high **(not max)** | OpenRouter | $0.66 | Max thinking is much more expensive and not worth it |
+| `mimo-v2.6-pro` | high | OpenRouter | $0.90 | May or may not be worth the extra money |
+| `deepseek-v4.1-flash` | high or max | OpenRouter | $1.00 | Great coder, but it hallucinates a lot |
+| `mimo-v2.6-flash` | high | OpenRouter | $0.30 | Dumber than the others |
+| `MiniCPM5-2B` | n/a | your PC | $0.01 (electricity) | *Much* dumber than the others; read [Use a local model](#use-a-local-model) |
 
 As a rule of thumb:
 
@@ -139,12 +139,12 @@ higher thinking translates to better results, but also longer wait and higher co
 Above you find a suggestion for the recommended thinking level for each model.
 
 Regardless of intelligence and cost, prose and interaction style varies substantially
-across models. Some models [talk in weird
-English](https://programasweights.com/claudish/dictionary); some are extremely verbose;
-some have a habit to gaslight you; some exhibit other unpleasant (in)human behaviour,
-and some do all of the above at once. The models in the shortlist have been vetted and
-should be *tolerable*, but there will still be differences between them. You should try
-them and find out which ones you prefer.
+across models. Some models hallucinate made-up data with utter confidence; some [talk in
+weird English](https://programasweights.com/claudish/dictionary); some are extremely
+verbose; some have a habit to gaslight you; some exhibit other unpleasant (in)human
+behaviour, and some do all of the above at once. The models in the shortlist have been
+vetted and should be *tolerable*, but there will still be differences between them. You
+should try them and find out which ones you prefer.
 
 ### Use a local model
 
