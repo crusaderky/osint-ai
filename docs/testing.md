@@ -96,11 +96,14 @@ for `<checkout>/.pixi/envs/*/bin/bwrap` is written and loaded, the assistant sta
 afterwards, and a second `pixi r install` asks for no password and changes nothing.
 When you cannot do that, say the Linux install is unverified.
 
-The Linux suite checks that the extension pins and the Pi version are what the
-repository claims, and that the intercom runtime directory is mounted as a
-tmpfs. It cannot show that delegation works: no test starts a child session,
-delivers an intercom message, or calls a model. See the checklist items on
-delegation.
+The Linux suite checks that the locked Pi version satisfies the floor the
+pi-subagents extension declares, and that the intercom runtime directory is
+mounted as a tmpfs. Exact extension pins, workflow YAML details and prose are
+not mirrored in the tests: a test that reads a file for phrases goes red when
+the file improves, and proves only that the file has not changed since the test
+was written. It cannot show that delegation works: no test starts a child
+session, delivers an intercom message, or calls a model. See the checklist
+items on delegation.
 
 ## GitHub Actions CI
 

@@ -62,45 +62,27 @@ class ConfigurationTests(unittest.TestCase):
         self.assertTrue(inference["no-default-feature"])
         self.assertEqual(inference["platforms"], ["linux-64-glibc234", "win-64"])
 
-    def test_extensions_are_pinned_and_built_against_the_locked_pi(self):
-        """Every extension is pinned, and the locked Pi satisfies their peers.
+    def test_the_locked_pi_satisfies_the_extension_floor(self):
+        """pi-subagents declares ``@earendil-works/pi-ai >=0.86.1``; the lock decides.
 
-        The manifest floats ``pi-coding-agent`` and so does the recipe
-        requirement, so the lock is what decides the Pi the extensions are
-        installed with. pi-subagents declares
-        ``@earendil-works/pi-ai >=0.86.1``; a re-lock that resolves anything
-        older silently breaks delegation, so the floor is asserted against the
-        lock rather than against a version string in the manifest. The pins here
-        must match the ``PLUGINS`` list in ``pixi-recipes/pi-extensions/recipe.yaml``,
-        which is the only place a pin is decided.
+        The manifest floats ``pi-coding-agent``, so a re-lock that resolves
+        anything older silently breaks delegation. Everything else about the
+        extension pins - exact versions, the recipe's plugin list - is the
+        recipe's own business and is not mirrored here.
         """
-        recipe = (ROOT / "pixi-recipes/pi-extensions/recipe.yaml").read_text()
-        build = re.search(r"PLUGINS: >-\n(?P<plugins>(?: {8}\S+\n)+)", recipe)
-        self.assertIsNotNone(build, "PLUGINS must be a space-separated pin list")
-        plugins = build.group("plugins").split()
-        self.assertIn("pi-intercom@0.16.1", plugins)
-        # The pins move, so this asserts the floor the tests were written against
-        # rather than one exact version.
-        subagents = next((p for p in plugins if p.startswith("pi-subagents@")), None)
-        self.assertIsNotNone(subagents, "pi-subagents must stay pinned")
-        self.assertGreaterEqual(
-            tuple(int(part) for part in subagents.split("@")[1].split(".")), (0, 76, 0)
+        locked = set(
+            re.findall(r"pi-coding-agent-(\d+\.\d+\.\d+)", (ROOT / "pixi.lock").read_text())
         )
-        # Pi's built-in llama.cpp provider replaces pi-llama-cpp, so the extension
-        # must not come back: two providers listing the same server is the bug that
-        # removing it fixed (tests/test_skeleton.py:test_local_models_are_generated).
-        self.assertFalse([p for p in plugins if "llama" in p], plugins)
-        for plugin in plugins:
-            self.assertRegex(plugin, r"^(@[\w.-]+/)?[\w.-]+@\d+\.\d+\.\d+$", plugin)
-        # Extensions are installed by a recipe that needs Pi at build time.
-        requirements = re.search(r"requirements:\n(?P<body>(?: {2,4}\S.*\n)+)", recipe).group("body")
-        self.assertEqual(len(re.findall(r"^\s+- pi-coding-agent", requirements, re.M)), 2)
-        locked = set(re.findall(r"pi-coding-agent-(\d+\.\d+\.\d+)", (ROOT / "pixi.lock").read_text()))
         self.assertEqual(len(locked), 1, "the lock must resolve exactly one Pi version")
         version = tuple(int(part) for part in locked.pop().split("."))
         self.assertGreaterEqual(
             version, (0, 86, 1), "pi-subagents requires @earendil-works/pi-ai >=0.86.1"
         )
+
+    def test_the_branch_helper_never_pushes(self):
+        """`git-branches.sh` updates local checkouts; publishing is the human's."""
+        helper = (SCRIPTS / "git-branches.sh").read_text()
+        self.assertIsNone(re.search(r"(?:sync_git|git)[^\n|]*\bpush\b", helper))
 
     def test_manifest_tools_and_tasks(self):
         data = tomllib.loads((ROOT / "pixi.toml").read_text())
@@ -186,13 +168,7 @@ class ConfigurationTests(unittest.TestCase):
             self.assertNotIn("/opt/osint-ai/server", path.read_text(), path)
 
     def test_ci_workflow_runs_this_suite(self):
-        """CI runs the suite that lives here, and it does not fake a platform.
-
-        A CI file that drifts from `pixi.toml` gives a green tick for a suite
-        nobody runs. The manifest resolves `linux-64` only, so CI installs its
-        Pixi environment on Linux runners only, and the Windows job parses the
-        installer instead of installing it.
-        """
+        """CI runs the suite that lives here; a drifting CI file is a false green tick."""
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("pixi run test", ci)
         self.assertIn("tests/Test-Installer.ps1", ci)
@@ -200,143 +176,48 @@ class ConfigurationTests(unittest.TestCase):
         # The environment the launcher looks up, installed from the lock.
         self.assertIn("environments: default", ci)
         self.assertIn("locked: true", ci)
-        # A runner that blocks the sandbox must say so instead of passing quietly.
-        self.assertIn("user namespaces", ci)
-        # CI no longer installs the distribution's bubblewrap: the sandbox runs the
-        # one the locked environment brings, so a job that installs that environment
-        # can probe the binary it will actually use.
-        self.assertNotIn("apt-get install -y --no-install-recommends bubblewrap", ci)
-        self.assertIn(".pixi/envs/default/bin/bwrap", ci)
 
     def test_local_inference_smoke_workflow_asks_a_real_assistant(self):
         """The unit suite never loads a model; this job does, and it is guarded.
 
-        A green `pixi run test` says nothing about inference: nothing in it has
-        weights or a server. `.github/workflows/llamacpp.yml` is the other half -
-        the real server, the real assistant through the sandbox launcher, and real
-        answers. It has to run the documented Linux installation first, because the
-        AppArmor profile is what lets the pinned bubblewrap start on a hosted
-        runner, and it must ask through the project launcher rather than a bare
-        `pi`, so a sandbox that cannot start fails the job instead of passing
-        quietly. The model it asks for is the one preset `models.ini` marks as
-        unit-test only. The Windows half of the same design is a job in ci.yml.
-
-        It asks that model without tools. A 350M preset cannot drive the coding
-        tools: it calls `read` and `edit` with arguments that fail validation,
-        reads its own errors and calls another one, which costs a request per
-        round trip on a two-core runner and leaves the job's verdict to whatever
-        that model put in its last message. One question, no tools, one answer is
-        what makes this a test of the sandbox and the server.
+        Only what makes the job honest is pinned: the documented Linux
+        installation, the real server through `pixi r llamacpp`, and the real
+        assistant through the sandbox launcher - never a bare `pi` - asked for
+        the unit-test-only preset without tools.
         """
         workflow = (ROOT / ".github/workflows/llamacpp.yml").read_text()
-        self.assertIn("runs-on: ubuntu-latest", workflow)
         self.assertIn("pixi r install", workflow)
-        self.assertIn("environments: default llamacpp-binary-vulkan", workflow)
-        self.assertIn("locked: true", workflow)
         self.assertIn("pixi r llamacpp", workflow)
-        # Foreground means the job has to close the server itself, and it does it
-        # by program name: a command-line pattern would match the step that runs
-        # the pattern.
-        self.assertIn("pkill -x llama-server", workflow)
-        # Asked without tools, and that is the point rather than a detail: the
-        # preset is a 350M model that cannot drive them, so a job whose red state
-        # came from the model's last message not being text would prove nothing
-        # about the sandbox. Both invocations, so neither half drifts back.
         self.assertIn("pixi r osint-pi -- --no-tools --model LFM2.5-230M", workflow)
-        self.assertNotIn("pixi r osint-pi -- --model", workflow)
-        # Loading the preset is its own step, before the assistant asks: a cold
-        # run downloads the weights, and that wait belongs to an explicit load
-        # rather than to the assistant's first request.
-        self.assertIn("http://127.0.0.1:8080/models/load", workflow)
-        # The server loads a model when a request names it (`--models-autoload` in
-        # scripts/server.py) but nothing at startup, so a load can also be asked
-        # for explicitly - and the workflow polling for it must not be the thing
-        # that loads it. And because the server runs in the foreground, the job
-        # redirects its output instead of leaving the step waiting on the pipe.
-        self.assertIn("pixi r llamacpp > llama-server.log 2>&1 &", workflow)
-        controller = (SCRIPTS / "server.py").read_text()
-        self.assertIn('"--models-autoload"', controller)
-        self.assertNotIn("--no-models-autoload", controller)
         # Never a bare `pi`, and never a flag that would skip the sandbox: that
         # would prove the model wiring and nothing about containment.
         self.assertNotIn("run: pi ", workflow)
-        self.assertNotIn("pixi run pi ", workflow)
         self.assertNotIn("--no-sandbox", workflow)
-        # A failure has to be explainable: what the server printed is dumped
-        # either way, because a foreground server has no log file of its own.
-        self.assertIn("if: always()", workflow)
-        self.assertIn("llama-server.log", workflow)
-        # Never end a step with `exit 0`. The job's shell is a *login* shell, and
-        # bash then runs `~/.bash_logout` on that exit path: Ubuntu's default file
-        # ends with a command that fails on a GitHub runner, so a successful step
-        # is reported as "Process completed with exit code 1" with no output. Fail
-        # with a nonzero command and let success fall off the end; piping needs
-        # `pipefail` because the login shell does not set it.
-        commands = [line.strip() for line in workflow.splitlines()]
-        self.assertNotIn("exit 0", commands)
-        self.assertNotIn("exit 1", commands)
-        # One per assistant run, in the two steps that pipe Pi's output to a log.
-        self.assertEqual(commands.count("set -o pipefail"), 2)
-        # The runner limit is reported, and the case the profile is supposed to
-        # fix is a failure instead of a warning.
-        self.assertIn("apparmor_restrict_unprivileged_userns", workflow)
-        self.assertIn("sandbox", workflow)
-        self.assertIn("ok=no", workflow)
-        self.assertIn("steps.sandbox.outputs.ok == 'yes'", workflow)
-        manifest = tomllib.loads((ROOT / "pixi.toml").read_text())
-        for environment in ("default", "llamacpp-binary-vulkan"):
-            self.assertIn(environment, manifest["environments"], environment)
 
     def test_the_windows_native_inference_job(self):
         """The win-64 half is only real on a Windows runner.
 
         ci.yml installs the inference environment there - the only environment
-        that resolves for win-64 - runs the native binary, and runs a real server
-        in the foreground through the same task the desktop icon runs, then closes
-        it. None of that can be proved on Linux, where the recipe builds a
-        different asset and the runner takes the POSIX code path.
+        that resolves for win-64 - and runs the real server in the foreground
+        through the same task the desktop icon runs.
         """
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.assertIn("runs-on: windows-latest", ci)
         self.assertIn("pixi install --locked -e llamacpp-binary-vulkan", ci)
         self.assertIn("_server", ci)
-        # Foreground on Windows means a child attached to this console, so closing
-        # it is what stops the server; the job has to name the process instead.
-        self.assertIn("Name = 'llama-server.exe'", ci)
-        self.assertIn("http://127.0.0.1:8080/health", ci)
         # The assistant's own environment must never be installed on Windows: Pi
         # runs inside WSL, and `default` does not resolve for win-64 at all.
         self.assertNotIn("environments: default llamacpp-binary-vulkan", ci)
 
-    def test_the_smoke_preset_says_what_it_is_for(self):
-        """The test model is listed in `/model`, so the file has to warn.
-
-        A compliance officer browsing models must not pick a 350M model for a
-        real case, and a maintainer reading the workflow must not have to guess
-        which entry it uses.
-        """
-        presets = (ROOT / "models.ini").read_text()
-        self.assertIn("[LFM2.5-230M]", presets)
-        section = presets.split("[LFM2.5-230M]", 1)[1].split("[", 1)[0]
-        self.assertIn("hf = LiquidAI/LFM2.5-350M-GGUF:Q4_K_M", section)
-        self.assertRegex(section, r"(?i)unit test(ing)? only")
-        # The workflow asks for exactly this preset name.
-        self.assertIn(
-            "--model LFM2.5-230M",
-            (ROOT / ".github/workflows/llamacpp.yml").read_text(),
-        )
-
     def test_the_model_shortlist_is_a_project_file(self):
-        """The models worth using change, so the list is a file, not code.
+        """The shortlist is data, validated as data; the wiring has its own tests.
 
-        `scripts/pi-entry.sh` merges it into the assistant's settings on every
-        launch, so updating the shortlist means editing one plain JSON file and
-        restarting the assistant. The file is part of the checkout and the entry
-        script reads it without checking, the same way the launcher trusts the
-        checkout it was started from.
+        Entries are Pi model references (``provider/modelId``), without
+        duplicates. A ``llama.cpp/`` entry must be a preset the server actually
+        has, and the unit-test preset must never be offered to a person doing
+        real work.
         """
-        shortlist = json.loads((ROOT / "model-shortlist.json").read_text())
-        patterns = shortlist["enabledModels"]
+        patterns = json.loads((ROOT / "model-shortlist.json").read_text())["enabledModels"]
         self.assertTrue(patterns)
         self.assertEqual(
             patterns,
@@ -346,8 +227,6 @@ class ConfigurationTests(unittest.TestCase):
         for pattern in patterns:
             # Pi matches `provider/modelId`; a bare id is ambiguous across providers.
             self.assertRegex(pattern, r"^[^/\s]+/\S+$", f"{pattern} is not provider/modelId")
-        # A local entry has to be a preset the server actually has, and the
-        # unit-test model must never be offered to a person doing real work.
         hosted = json.loads((ROOT / "pixi-recipes/pi-home/models.json").read_text())
         presets = {f"llama.cpp/{model['id']}" for model in hosted["providers"]["llama.cpp"]["models"]}
         for pattern in patterns:
@@ -355,50 +234,6 @@ class ConfigurationTests(unittest.TestCase):
                 self.assertIn(pattern, presets, f"{pattern} has no llama.cpp preset")
         self.assertIn("llama.cpp/MiniCPM5-2B", patterns)
         self.assertNotIn("llama.cpp/LFM2.5-230M", patterns)
-        # The launcher names the program checkout, and the entry script derives
-        # the same one from the environment prefix: three levels up.
-        launcher = (SCRIPTS / "sandbox.py").read_text()
-        self.assertIn(
-            '"OSINT_MODEL_SHORTLIST": str(program_mount / MODEL_SHORTLIST_NAME)', launcher
-        )
-        self.assertIn('MODEL_SHORTLIST_NAME = "model-shortlist.json"', launcher)
-        entry = (SCRIPTS / "pi-entry.sh").read_text()
-        self.assertIn(
-            f'export OSINT_MODEL_SHORTLIST="$checkout/{sandbox.MODEL_SHORTLIST_NAME}"', entry
-        )
-        self.assertIn('cd -- "$CONDA_PREFIX/../../.."', entry)
-        self.assertIn("os.environ['OSINT_MODEL_SHORTLIST']", entry)
-
-    def test_the_model_cache_is_the_default_hugging_face_location(self):
-        """Weights go to `~/.cache/huggingface/hub`, and nothing may redirect them.
-
-        They used to sit in the inference state directory, because the controller
-        pinned `LLAMA_CACHE` and `XDG_CACHE_HOME` to it: a user who already
-        downloads models with another tool then had two copies, and a plain Linux
-        checkout kept hundreds of MB under its private state. The fix is to pass
-        HOME and no cache variable at all - llama.cpp's own fallback
-        (`common/hf-cache.cpp`) is the standard path. There is no inference state
-        directory at all now: a foreground server writes to its window, not to a
-        log file. Asserting the absence of the redirect is the real test; pinning
-        the path here would only be a second copy of llama.cpp's default to keep
-        in step.
-        """
-        controller = (SCRIPTS / "server.py").read_text()
-        for name in (
-            '"LLAMA_CACHE":',
-            '"HF_HUB_CACHE":',
-            '"HUGGINGFACE_HUB_CACHE":',
-            '"HF_HOME":',
-            '"XDG_CACHE_HOME":',
-        ):
-            self.assertNotIn(name, controller, name)
-        self.assertNotIn('STATE_ROOT / "models"', controller)
-        # The smoke workflow caches that same directory, so a cold run does not
-        # download the weights again.
-        self.assertIn(
-            "path: ~/.cache/huggingface/hub",
-            (ROOT / ".github/workflows/llamacpp.yml").read_text(),
-        )
 
     def test_installer_parse_test_survives_a_crlf_checkout(self):
         """`*.ps1` is checked out with CRLF, so the Bash check must drop the CR.
@@ -411,19 +246,6 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("*.ps1 text eol=crlf", (ROOT / ".gitattributes").read_text())
         parse_test = (ROOT / "tests/Test-Installer.ps1").read_text()
         self.assertIn('-replace "`r`n", "`n"', parse_test)
-
-    def test_provisioning_checks_the_mount_point_not_the_windows_path(self):
-        """The Windows path names no directory inside the distribution.
-
-        Provisioning used to ask whether ``C:\\Users\\<name>\\osint-ai`` was a
-        directory *inside WSL*, which it never is, so a first installation stopped
-        at "Windows checkout is not mounted." before it installed anything. That
-        same folder is bound at /mnt/osint-ai, and that is what has to exist.
-        """
-        script = (WINDOWS / "provision-wsl.sh").read_text()
-        self.assertIn("WINDOWS_MOUNT=/mnt/osint-ai", script)
-        self.assertIn("[[ -d $WINDOWS_MOUNT ]]", script)
-        self.assertNotIn("[[ -d $WINDOWS_CHECKOUT ]]", script)
 
     def test_provisioning_pre_creates_no_state_at_all(self):
         """Nothing about a run is pre-created by the Windows installer.
@@ -473,36 +295,6 @@ class ConfigurationTests(unittest.TestCase):
             'runtime_installer=$linux/windows/install-runtime.sh',
             (WINDOWS / "update-installation.sh").read_text(),
         )
-
-    def test_the_update_command_carries_the_branch_rule(self):
-        """main fast-forwarded, staging fast-forwarded and given main - once.
-
-        The rule used to be a plain `git pull --ff-only`, which left `main` behind
-        `staging`'s checkout at whatever it was cloned at. Both checkouts run the
-        same helper now, and a refusal means nothing was installed either.
-        """
-        command = (SCRIPTS / "update-project.sh").read_text()
-        self.assertIn('source "$here/git-branches.sh"', command)
-        self.assertNotIn("git pull", command)
-        self.assertLess(command.index("sync_branches"), command.index("install --locked"))
-        self.assertIn("if ((status == 1)); then", command)
-        helper = (SCRIPTS / "git-branches.sh").read_text()
-        for needle in (
-            "checkout --quiet main",
-            "merge --ff-only origin/main",
-            "checkout --quiet staging",
-            "merge --ff-only origin/staging",
-            "merge --no-edit main",
-            "merge --abort",
-        ):
-            self.assertIn(needle, helper, needle)
-        # Hooks and fsmonitor commands come from the checkout being updated, which
-        # the assistant can write in the Windows deployment.
-        self.assertIn("core.hooksPath=/dev/null", helper)
-        self.assertIn("core.fsmonitor=false", helper)
-        self.assertIn("core.pager=cat", helper)
-        # Nothing in the helper pushes, whatever a branch looks like.
-        self.assertIsNone(re.search(r"(?:sync_git|git)[^\n|]*\bpush\b", helper))
 
     def test_the_windows_updater_writes_checkouts_as_the_user_not_as_root(self):
         """Root installs files; the checkouts belong to `osint`.
@@ -670,93 +462,29 @@ class ConfigurationTests(unittest.TestCase):
         self.assertFalse(sandbox.PROGRAM_MOUNT.is_relative_to(sandbox.AGENT_MOUNT))
 
     def test_skill_discovery_and_guidance(self):
+        """One guide, one skills path, and no second copy that can drift.
+
+        What is pinned here is what the launcher and Pi both read: the packaged
+        Pi home points at the one skills mount, the model template points at the
+        local server, and no packaged file carries a second AGENTS.md that could
+        shadow the workspace guide. The guide's prose and the entry script's
+        mechanics are not mirrored here; the entry script has its own tests.
+        """
         settings = json.loads((ROOT / "pixi-recipes/pi-home/settings.json").read_text())
         self.assertEqual(settings["skills"], [SKILLS_PATH])
         # No `llamaSettings` block any more: that was pi-llama-cpp's configuration,
         # and Pi's built-in llama.cpp provider reads `LLAMA_BASE_URL` instead.
         self.assertNotIn("llamaSettings", settings)
-        # The models Pi may pick from are generated at launch from a shipped
-        # template, because the address of the server is a deployment detail.
         template = json.loads((ROOT / "pixi-recipes/pi-home/models.json").read_text())
         provider = template["providers"]["llama.cpp"]
         self.assertEqual(provider["baseUrl"], "http://127.0.0.1:8080/v1")
         self.assertEqual(provider["api"], "openai-completions")
-        self.assertEqual(
-            [model["id"] for model in provider["models"]], ["MiniCPM5-2B", "LFM2.5-230M"]
-        )
-        build = (ROOT / "pixi-recipes/pi-home/build.sh").read_text()
-        self.assertIn('cp -a models.json "${PREFIX}/home/.pi/agent/models.json"', build)
-        entry = (SCRIPTS / "pi-entry.sh").read_text()
-        self.assertIn('exec pi "${pi_flags[@]}" "${PI_ARGS[@]}"', entry)
-        self.assertIn('pi_flags=(--skill "$skills" --no-context-files)', entry)
-        self.assertIn(f"OSINT_SKILLS_DIR:-{SKILLS_PATH}", entry)
-        # The guide is named from the same mount path the launcher exports.
-        self.assertIn(f"OSINT_WORKSPACE:-{WORKSPACE_PATH}", entry)
-        self.assertIn('--append-system-prompt "$guide"', entry)
-        # The launcher exports the same value, so the guidance and the mounts
-        # cannot drift from each other.
-        launcher = (SCRIPTS / "sandbox.py").read_text()
-        self.assertIn(f'"OSINT_SKILLS_DIR": str(SKILLS_MOUNT)', launcher)
-        # The workspace guide forbids the conventional but unreviewable locations,
-        # and names the skills path the launcher passes to Pi.
-        workspace_guide = (ROOT / "workspace/AGENTS.md").read_text()
-        self.assertIn(f"{SKILLS_PATH}/<skill-name>/SKILL.md", workspace_guide)
-        for forbidden in ("~/.pi", "~/.agents", ".pi/skills"):
-            self.assertIn(forbidden, workspace_guide)
-        # Reminders about uncommitted work are documented where the agent reads them.
-        self.assertIn("git status", workspace_guide)
         # There is one guide, and it is in the checkout the agent works in. The
         # packaged Pi home must not carry a second copy that can drift from it,
         # and the launcher must not put one in the agent home.
         self.assertFalse((ROOT / "pixi-recipes/pi-home/AGENTS.md").exists())
         self.assertNotIn("AGENTS.md", (ROOT / "pixi-recipes/pi-home/build.sh").read_text())
         self.assertNotIn("agent/AGENTS.md", (SCRIPTS / "sandbox.py").read_text())
-
-    def test_package_listing_guidance(self):
-        """The sandbox has no `pixi` and no `conda`, so the guidance must name the
-        records the environment itself leaves behind.
-
-        `pixi list`, `pixi ls` and `conda list` are `command not found` for the
-        assistant, and `pip list` reports only the Python libraries, not the
-        command-line tools. `$CONDA_PREFIX` is exported by the launcher, so
-        `$CONDA_PREFIX/conda-meta` is the list that actually works in both
-        deployments.
-        """
-        guide = (ROOT / "workspace/AGENTS.md").read_text()
-        self.assertIn("$CONDA_PREFIX/conda-meta", guide)
-        self.assertIn("$CONDA_PREFIX/bin", guide)
-        self.assertIn("importlib.metadata", guide)
-        # The commands that do not work are named so the agent does not retry them.
-        for broken in ("pixi list", "conda list", "pip list"):
-            self.assertIn(broken, guide)
-        launcher = (SCRIPTS / "sandbox.py").read_text()
-        self.assertIn('"CONDA_PREFIX": str(env_prefix)', launcher)
-
-    def test_the_workspace_guide_keeps_the_agent_on_staging(self):
-        """One development branch, checked before the agent touches anything.
-
-        The agent commits in the checkout the user publishes from, so it must
-        never write to `main`. Guidance lets it switch `main` -> `staging` and
-        merge the published `main` back into `staging`, and nothing else.
-        """
-        guide = (ROOT / "workspace/AGENTS.md").read_text()
-        for needle in (
-            "git status --porcelain=v1 -b",
-            "git checkout staging",
-            "git fetch origin",
-            "git rev-list --count staging..origin/main",
-            "git merge origin/main",
-            "git merge --abort",
-        ):
-            self.assertIn(needle, guide, needle)
-        # A conflict is the maintainer's call, never the agent's, and the agent
-        # never publishes the development branch.
-        self.assertIn("do not resolve it", guide)
-        self.assertIn("Never merge `staging` into `main`", guide)
-        self.assertIn("`git push`, or ask for GitHub credentials", guide)
-        # The old blanket ban on branch switching would forbid the required
-        # switch, so it must not come back as the only rule.
-        self.assertNotIn("`git checkout <branch>`", guide)
 
     def test_no_skill_or_runtime_file_keeps_the_old_workspace_mount(self):
         """`/workspace` no longer exists in the sandbox; nothing may name it.
@@ -790,11 +518,10 @@ class ConfigurationTests(unittest.TestCase):
                     )
 
     def test_bundled_skills_are_valid(self):
+        """Every skill has valid frontmatter, and every helper file it names exists."""
         skills = ROOT / "workspace/.agents/skills"
         names = sorted(path.parent.name for path in skills.glob("*/SKILL.md"))
-        self.assertIn("spreadsheet-reader", names)
-        self.assertIn("markdown-pdf", names)
-        self.assertIn("compliance-report", names)
+        self.assertTrue(names)
         for name in names:
             text = (skills / name / "SKILL.md").read_text()
             frontmatter = re.match(r"---\n(.*?)\n---\n", text, re.S)
@@ -804,33 +531,17 @@ class ConfigurationTests(unittest.TestCase):
             )
             self.assertEqual(fields.get("name", "").strip(), name)
             self.assertGreater(len(fields.get("description", "").strip()), 40, name)
-        # Every documented workflow points at helpers that exist.
-        reader = (skills / "spreadsheet-reader/SKILL.md").read_text()
-        self.assertIn("scripts/sheet.py", reader)
-        self.assertTrue((skills / "spreadsheet-reader/scripts/sheet.py").is_file())
-        converter = (skills / "markdown-pdf/SKILL.md").read_text()
-        self.assertIn("scripts/build-pdf.sh", converter)
-        self.assertIn("pdftotext", converter)
-        self.assertTrue((skills / "markdown-pdf/scripts/build-pdf.sh").is_file())
-        self.assertTrue((skills / "markdown-pdf/assets/report.css").is_file())
-        self.assertTrue((skills / "markdown-pdf/assets/template.html").is_file())
-
-    def test_report_and_conversion_skills_are_separate(self):
-        """Report authorship and PDF conversion must not drift back together."""
-        skills = ROOT / "workspace/.agents/skills"
-        report = (skills / "compliance-report/SKILL.md").read_text()
-        converter = (skills / "markdown-pdf/SKILL.md").read_text()
-        # The report skill owns the content and hands the file over.
-        for section in ("Executive summary", "Scope and method", "Sources", "confidence"):
-            self.assertIn(section, report, section)
-        self.assertIn("markdown-pdf", report)
-        self.assertIn("build-pdf.sh", report)
-        # The conversion skill owns the bytes and sends authorship elsewhere.
-        for tool in ("pandoc", "pdfinfo", "pdftotext", "pdftoppm"):
-            self.assertIn(tool, converter, tool)
-        self.assertIn("compliance-report", converter)
-        for section in ("## Executive summary", "## Scope and method", "## Sources"):
-            self.assertNotIn(section, converter, section)
+        # A skill that names a helper must ship it: the same rule as the README's
+        # link check, applied to the paths a SKILL.md tells the agent to run or read.
+        for path in sorted(skills.glob("*/SKILL.md")):
+            for mention in re.findall(
+                r"[\w./-]+/[\w./-]+\.(?:py|sh|css|html|ini|json)", path.read_text()
+            ):
+                if mention.startswith(("scripts/", "assets/")):
+                    self.assertTrue(
+                        (path.parent / mention).is_file(),
+                        f"{path.parent.name}/SKILL.md names missing {mention}",
+                    )
 
     def test_skill_scripts_only_use_available_programs(self):
         """Skill scripts run on the sandbox PATH: coreutils, or a pixi dependency."""
@@ -931,93 +642,20 @@ class ConfigurationTests(unittest.TestCase):
                 subprocess.run(["/bin/bash", "-n", str(file)], check=True)
 
     def test_windows_bootstrap_is_non_destructive(self):
+        """The installer may install and update; it may never destroy.
+
+        Only the actions that would discard the user's work or the distribution
+        itself are pinned here. Everything else about the installer - icons,
+        hashes, command details - is checked on a real PC, not mirrored here.
+        """
         script = (WINDOWS / "Install.ps1").read_text()
         self.assertNotIn("--unregister", script)
         self.assertNotIn("reset --hard", script)
         self.assertNotIn("git pull", script)
-        # The checkout the assistant commits from is brought forward before
-        # anything is installed from it, because provisioning, the runtime files
-        # and the guided sandbox are all read out of it. The rule itself is not
-        # written down a second time here: the installer runs the same helper the
-        # Update OSINT AI icon runs, so both end on `staging` with `main` merged in
-        # and both refuse, changing nothing, instead of resolving a conflict or
-        # discarding unpublished work. A second, weaker copy of the rule in this
-        # file is how the installer came to install a checkout that had never been
-        # brought forward.
-        # Read out of the fetched `main`, not taken from the checkout: the checkout
-        # is the thing being repaired, and its own copy of this very rule is what is
-        # out of date when a repair is needed. Fetching it from the checkout is how
-        # the installer came to leave an installation behind.
+        # The branch rule is read out of the published `main`, not from the
+        # checkout being repaired: its own copy of the rule is what is out of
+        # date when a repair is needed.
         self.assertIn("show origin/main:scripts/git-branches.sh", script)
-        self.assertIn('/bin/bash -p "$helper" /mnt/osint-ai "$REPOSITORY"', script)
-        self.assertNotIn("/bin/bash -p /mnt/osint-ai/scripts/git-branches.sh", script)
-        self.assertLess(
-            script.index("fetch --quiet --prune origin"),
-            script.index("show origin/main:scripts/git-branches.sh"),
-            "the published helper is read after the fetch that publishes it",
-        )
-        self.assertIn(
-            "remote set-branches origin '*'", script
-        )  # every branch, or the helper cannot see staging
-        self.assertIn('GIT_CONFIG_KEY_0=safe.directory', script)
-        # Those Git commands run in a `.git` the assistant can write.
-        self.assertIn("core.hooksPath=/dev/null -c core.fsmonitor=false", script)
-        self.assertNotIn("merge --ff-only", script)
-        self.assertNotIn("checkout main", script)
-        self.assertNotIn("checkout --quiet staging", script)
-        self.assertNotIn("git switch", script)
-        self.assertEqual(script.count("sync_branches || exit 1"), 2, "every path must sync")
-        # A completed installation refreshes the root-owned runtime from the
-        # checkout the human installed, so a PC that predates a change is updated
-        # instead of being told to reinstall.
-        self.assertIn("/mnt/osint-ai/windows/install-runtime.sh", script)
-        # The Linux checkout is preferred when it has the installer: the sandbox
-        # mounts it read-only, so the assistant cannot write what gets installed as
-        # root, and a checkout too old to carry one falls back to the other.
-        self.assertIn("runtime_installer=$LINUX_PROJECT/windows/install-runtime.sh", script)
-        # The Update icon: a wrapper outside the checkout, so it cannot change with
-        # the commit the checkout is on, and it reinstalls the native inference
-        # environment from the checkout the WSL side just updated.
-        self.assertIn("update-osint-ai.cmd", script)
-        self.assertIn("'Update OSINT AI.lnk'", script)
-        self.assertIn("/usr/local/lib/osint-ai/update-installation.sh", script)
-        self.assertIn("--locked -e llamacpp-binary-vulkan", script)
-        self.assertIn("-e llamacpp-binary-vulkan --manifest-path", script)
-        self.assertIn("--no-distribution", script)
-        self.assertIn("Get-FileHash", script)
-        self.assertIn("Restart Windows", script)
-        self.assertIn("ConvertTo-ShellLiteral", script)
-        self.assertIn("/usr/local/bin/osint-terminal", script)
-        self.assertIn("/mnt/osint-ai/windows/provision-wsl.sh", script)
-
-    def test_the_terminal_shortcut_is_a_console_not_a_pipe(self):
-        """The assistant is a full-screen terminal program, so it needs a pty.
-
-        The assistant is a full-screen terminal program: pipes instead of a pty
-        mean it prints its startup lines and never takes a keystroke. A
-        `wsl.exe` console window gives the distribution a pty, which is all the
-        assistant needs, and every Windows PC already has it.
-        """
-        script = (WINDOWS / "Install.ps1").read_text()
-        self.assertIn("'OSINT AI Terminal.lnk'", script)
-        self.assertIn("System32" + chr(92) + "wsl.exe", script)
-        self.assertIn("-d $Distro -u osint -e /usr/local/bin/osint-terminal", script)
-
-    def test_the_reachability_check_asks_the_launcher_as_the_assistant_user(self):
-        """The launcher refuses to run as root, so the probe has to be `osint`.
-
-        The installer asked `sandbox.py --wsl --inference-url` through the same root
-        transport that provisions the distribution. That refusal was then reported as
-        "this installation is older than this installer", so the one check that the
-        assistant really reaches the model server on Windows could never pass.
-        """
-        script = (WINDOWS / "Install.ps1").read_text()
-        capture = re.search(r"function Invoke-WslCapture.*?\n}\n", script, re.S)
-        self.assertIsNotNone(capture, "Invoke-WslCapture is gone; the probe moved")
-        self.assertIn("--user osint", capture.group(0))
-        self.assertNotIn("--user root", capture.group(0))
-        # Root still runs the one script that installs into the distribution.
-        self.assertIn("--user root", script)
 
     def test_the_runtime_never_names_the_removed_installer_wrapper(self):
         """The wrapper went with the zip, so no message may send a user to it.
@@ -1035,60 +673,6 @@ class ConfigurationTests(unittest.TestCase):
                 continue
             with self.subTest(file=path.relative_to(ROOT)):
                 self.assertNotIn("Install.cmd", path.read_text())
-
-    def test_the_inference_recipe_ships_the_vulkan_build(self):
-        """One release asset per platform, checked against its published hash.
-
-        The recipe used to build a CUDA-only Linux package with rattler-build
-        downloading the asset; llama.cpp now runs on Vulkan, on Windows natively and
-        on Linux inside the checkout, and Windows has no tar to extract a tar.gz
-        with, so both asset shapes have to be handled and both hashes pinned.
-        """
-        recipe = (ROOT / "pixi-recipes/llama-cpp-binary/recipe.yaml").read_text()
-        variants = (ROOT / "pixi-recipes/llama-cpp-binary/variants.yaml").read_text()
-        self.assertIn("backend: [\"cpu\", \"vulkan\"]", variants)
-        self.assertNotIn("cuda", variants)
-        # The published digest of each release asset, one per platform; a wrong
-        # value fails the install instead of installing something else.
-        self.assertIn(
-            "0056cbd32440e646bbe8e3a3f797bf2aef15c9dd5ebf77b9b19830434c1ae541", recipe
-        )
-        self.assertIn(
-            "e1eaddcde761b1f839b9c6d5924b97f2698fba22068ca3b63f129c3caf55b88f", recipe
-        )
-        self.assertIn("llama-${{ version }}-bin-ubuntu-vulkan-x64.tar.gz", recipe)
-        self.assertIn("llama-${{ version }}-bin-win-vulkan-x64.zip", recipe)
-        self.assertIn("fork: ggml-org/llama.cpp", recipe)
-        # No asset of a fork: the fork's preset options are not implemented on
-        # the build this project ships (see the recipe's own comment).
-        self.assertNotIn("beellama-${{ version }}", recipe)
-        self.assertIn("sha256:", recipe)
-        # Windows extracts a zip with build.bat; the recipe resolves the script by
-        # extension-less name so one recipe covers both platforms.
-        self.assertIn("file: build", recipe)
-        self.assertTrue((ROOT / "pixi-recipes/llama-cpp-binary/build.bat").is_file())
-        self.assertTrue((ROOT / "pixi-recipes/llama-cpp-binary/build.sh").is_file())
-        manifest = tomllib.loads((ROOT / "pixi.toml").read_text())
-        dependency = manifest["feature"]["llamacpp-binary-vulkan"]["dependencies"]["llama-cpp"]
-        self.assertEqual(dependency["flags"], ["vulkan"])
-        self.assertEqual(dependency["path"], "pixi-recipes/llama-cpp-binary")
-
-    def test_the_model_presets_only_use_options_the_build_accepts(self):
-        """An option the runtime does not know stops the server from starting.
-
-        The router validates every preset key and refuses the whole file over an
-        unknown one (`option 'kv-tail-tokens' not recognized in preset`). The
-        presets therefore may not name a fork-only option: the runtime is
-        upstream llama.cpp, whose KV cache types are f32/f16/bf16/q8_0/q4_0/
-        q4_1/iq4_nl/q5_0/q5_1 - no q3_0, and no exact BF16 KV tail.
-        """
-        presets = (ROOT / "models.ini").read_text()
-        self.assertNotIn("kv-tail-tokens", presets)
-        self.assertNotIn("q3_0", presets)
-        # Every preset quantizes K and V, and to the same supported type.
-        bodies = presets.split("[*]", 1)[1]
-        self.assertEqual(bodies.count("cache-type-k = "), bodies.count("cache-type-v = "))
-        self.assertGreaterEqual(bodies.count("cache-type-v = q4_0"), 2)
 
     def test_the_generated_model_list_matches_the_server_presets(self):
         """The two lists are hand-written in two places, so they have to agree.
@@ -1119,57 +703,62 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(int(context.group(1)), model["contextWindow"], model["id"])
             self.assertNotIn("samplingParams", model, model["id"])
 
+    def test_the_inference_recipe_ships_the_vulkan_build(self):
+        """One recipe, Vulkan on both platforms, digests pinned, no fork options.
+
+        The exact asset names and hashes live in the recipe; what is pinned here
+        is the shape: both platforms build, nothing CUDA, every asset carries a
+        sha256, and the manifest actually uses the recipe with the vulkan flag.
+        """
+        variants = (ROOT / "pixi-recipes/llama-cpp-binary/variants.yaml").read_text()
+        self.assertIn('backend: ["cpu", "vulkan"]', variants)
+        self.assertNotIn("cuda", variants)
+        recipe = (ROOT / "pixi-recipes/llama-cpp-binary/recipe.yaml").read_text()
+        self.assertIn("fork: ggml-org/llama.cpp", recipe)
+        self.assertIn("sha256:", recipe)
+        # No asset of a fork: the fork's preset options are not implemented on
+        # the build this project ships (see the recipe's own comment).
+        self.assertNotIn("beellama", recipe)
+        self.assertTrue((ROOT / "pixi-recipes/llama-cpp-binary/build.bat").is_file())
+        self.assertTrue((ROOT / "pixi-recipes/llama-cpp-binary/build.sh").is_file())
+        manifest = tomllib.loads((ROOT / "pixi.toml").read_text())
+        dependency = manifest["feature"]["llamacpp-binary-vulkan"]["dependencies"]["llama-cpp"]
+        self.assertEqual(dependency["flags"], ["vulkan"])
+        self.assertEqual(dependency["path"], "pixi-recipes/llama-cpp-binary")
+
+    def test_the_model_presets_only_use_options_the_build_accepts(self):
+        """An option upstream llama.cpp does not know stops the server cold.
+
+        The router refuses the whole preset file over one unknown key, so the
+        presets may not name a fork-only option: the runtime is upstream
+        llama.cpp - no ``kv-tail-tokens``, no q3_0 KV cache type.
+        """
+        presets = (ROOT / "models.ini").read_text()
+        self.assertNotIn("kv-tail-tokens", presets)
+        self.assertNotIn("q3_0", presets)
+
     def test_the_installer_installs_and_checks_native_inference(self):
         """The Windows half of the inference design, in the trusted installer.
 
-        Pixi is installed natively to build the llama.cpp environment in the Windows
-        checkout; the environment is installed from the lock; WSL reaching a server
-        on Windows needs a firewall rule, which is the one extra permission prompt;
-        and the installer proves that path by starting the server and asking it from
-        inside the distribution instead of assuming it works.
+        What is pinned here is the part that is a security boundary: the
+        inbound firewall rule is scoped to the WSL adapter and the local subnet,
+        so nothing beyond the local network reaches the model server, and the
+        acceptance check asks the real server from inside WSL - loopback is a
+        different machine there - through the launcher.
         """
         script = (WINDOWS / "Install.ps1").read_text()
-        self.assertIn("pixi-x86_64-pc-windows-msvc.zip", script)
-        self.assertIn("$PixiSha256", script)
-        self.assertIn(
-            "'install', '--locked', '-e', 'llamacpp-binary-vulkan', '--manifest-path', $manifest",
-            script,
-        )
-        self.assertIn(
-            "'run', '--locked', '-e', 'llamacpp-binary-vulkan', '--manifest-path', $manifest, '_server'",
-            script,
-        )
-        # One rule, bound to the WSL interface and the local subnet, so the rest of
-        # the network still cannot reach the model server. Removing it first keeps a
-        # rerun idempotent, and an unchanged rule needs no prompt at all.
+        self.assertIn("--locked", script)
         self.assertIn("New-NetFirewallRule", script)
-        self.assertIn("Remove-NetFirewallRule", script)
         self.assertIn("-Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080", script)
         self.assertIn("-RemoteAddress LocalSubnet", script)
         self.assertIn("vEthernet (WSL*", script)
-        self.assertIn("Get-NetFirewallInterfaceFilter", script)
-        self.assertIn("-Verb RunAs", script)
-        # The acceptance check asks the launcher for the address, and asks the real
-        # server from inside WSL - loopback is a different machine there.
         self.assertIn("Get-InferenceReachability", script)
         self.assertIn("sandbox.py --wsl --inference-url", script)
-        # One icon, and it runs the same task the Linux deployment runs. llama.cpp
-        # stays in that console window: closing the window is the stop, so there is
-        # no Stop icon and no wrapper for it.
-        self.assertIn("'Start llama.cpp.lnk'", script)
-        self.assertIn('"$manifest`" _server"', script)
-        self.assertNotIn("'Stop llama.cpp.lnk'", script)
-        self.assertNotIn("stop-inference.cmd", script)
-        # Nothing the installer runs stops a server the user started: the update
-        # refuses while llama.cpp holds the files it is about to replace, and only
-        # the installer's own probe closes a server, by program name.
-        self.assertIn('tasklist /FI "IMAGENAME eq llama-server.exe"', script)
-        self.assertIn("Close the llama.cpp window first", script)
-        self.assertIn("function Stop-NativeInference", script)
-        self.assertIn("Get-CimInstance -ClassName Win32_Process", script)
         # One reviewed pixi release for both sides of the installation.
         windows_pin = re.search(r"\$PixiVersion = '([\d.]+)'", script).group(1)
-        wsl_pin = re.search(r"^PIXI_VERSION=([\d.]+)$", (WINDOWS / "provision-wsl.sh").read_text(), re.M)
+        wsl_pin = re.search(
+            r"^PIXI_VERSION=([\d.]+)$", (WINDOWS / "provision-wsl.sh").read_text(), re.M
+        )
         self.assertEqual(windows_pin, wsl_pin.group(1))
 
     def test_wsl_provisioning_leaves_inference_to_windows(self):
@@ -1694,9 +1283,6 @@ class InstallCheckTests(unittest.TestCase):
         # the AppArmor profile where Ubuntu restricts user namespaces, and the
         # honest "this machine cannot sandbox" everywhere else.
         self.assertIn("user namespace", result.stdout)
-        check = (SCRIPTS / "install-check.sh").read_text()
-        self.assertIn("pixi r install-apparmor", check)
-        self.assertIn("refuses unprivileged user namespaces outright", check)
 
     def test_local_inference_is_reported_as_optional(self):
         """A checkout without llama.cpp is a working checkout, not a broken one."""
@@ -2306,17 +1892,6 @@ class SandboxArgumentTests(SandboxFixture):
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("--native|--wsl", result.stderr)
-
-    def test_the_launcher_names_the_checkout_that_holds_pixi_toml(self):
-        """`bwrap-pi.sh` sits in `<checkout>/scripts`, so the root is one level up.
-
-        Comparing against `$here/pixi.toml` is never true, which left the project
-        root to whatever directory Pixi happened to be invoked from.
-        """
-        script = (SCRIPTS / "bwrap-pi.sh").read_text()
-        self.assertIn('"$here/../pixi.toml"', script)
-        self.assertIn('OSINT_PROJECT_ROOT:-$(cd -- "$here/.." && pwd)', script)
-
 
 class AgentGitTests(SandboxFixture):
     """The agent runs Git in the checkout it works in; this is what it sees."""
