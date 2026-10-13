@@ -56,7 +56,7 @@ weasyprint = "*"
 poppler = "*"
 
 [feature.pi.dependencies]
-pi-coding-agent = "*"
+pi-coding-agent = "<1.2.0"  # FIXME 1.2.0 fails to download fd
 pi-extensions = { path = "pixi-recipes/pi-extensions" }
 pi-home = { path = "pixi-recipes/pi-home" }
 
