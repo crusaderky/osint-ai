@@ -1,3 +1,6 @@
+# Investigation outputs — never commit
+workspace/output/
+
 # pixi environments
 .pixi/*
 !.pixi/config.toml

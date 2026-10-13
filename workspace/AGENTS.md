@@ -239,9 +239,13 @@ python -c "import importlib.metadata as m; [print(d.name, d.version) for d in m.
 ## Never commit reports or investigation material
 
 * Never commit report files (`.md` or `.pdf` deliverables, e.g. anything under
-  `reports/`) or any file whose content is about a specific investigation,
+  `output/`) or any file whose content is about a specific investigation,
   subject or client to Git — not on `staging`, not anywhere. Deliverables live
   only on the local disk for the user to keep, share or delete themselves.
+* All output files belong in `workspace/output/`. Input files the user copies
+  into the checkout for an investigation, and every file you produce from them
+  (notes, intermediate results, spreadsheets, reports), are case-specific
+  content: they must never be committed to Git.
 * `AGENTS.md`, skills and general reference material are still committed as
   normal; the exclusion applies to case-specific content.
 * If such files have been committed by mistake, untrack them
