@@ -24,7 +24,10 @@ permissions:
 # The unit suite never loads a model, and it cannot: it has no weights and no
 # server. This job is the other half - it starts the real inference server the
 # way a maintainer does - in the foreground, with its output on the screen -
-# starts the real assistant through the sandbox launcher, and asks it a question. It is a separate workflow because it downloads the
+# starts the real assistant through the sandbox launcher, and asks it a
+# question - without tools, because the preset it asks is a 350M unit-test model
+# that cannot drive them and every tool it calls is one more request against a
+# two-core runner. It is a separate workflow because it downloads the
 # Vulkan llama.cpp build plus a few hundred MB of weights, which no other job
 # needs. The Windows half - the same build inside the Windows checkout, and the
 # assistant reaching it from inside WSL - is a job of its own in ci.yml, on a
@@ -189,6 +192,17 @@ jobs:
       # rather than a bare `pi` - a sandbox that cannot start has to fail this
       # job. Only when the probe above found a sandbox, because this step is the
       # one half a runner without user namespaces cannot run.
+      #
+      # `--no-tools` is what keeps this a smoke test instead of a lottery. The
+      # preset is a 350M model and it cannot drive the coding tools: it calls
+      # `read` and `edit` with arguments that fail validation, reads its own
+      # errors, and calls another one. Every one of those round trips is another
+      # request on a two-core runner, and what Pi prints at the end is only
+      # whatever that model left in its last message - one run of exactly this
+      # job printed nothing at all while the server was answering, which is a red
+      # job that says nothing about the sandbox it exists to prove. One question
+      # without tools is one request and one answer. What a local model does with
+      # tools is not covered by this job; docs/testing.md says so.
       - name: pi Hello world
         if: steps.sandbox.outputs.ok == 'yes'
         run: |
@@ -196,9 +210,12 @@ jobs:
           # The status is checked by hand because the login shell has no `set -e`:
           # otherwise the step would report the last command alone, and a Pi that
           # died inside bubblewrap still leaves a log file behind.
-          pixi r osint-pi -- --model LFM2.5-230M -p 'Hello world' | tee pi-smoke.log
+          pixi r osint-pi -- --no-tools --model LFM2.5-230M -p 'Hello world' | tee pi-smoke.log
           status=$?
-          test -s pi-smoke.log
+          if [[ ! -s pi-smoke.log ]]; then
+            echo 'The assistant printed no answer; its session is dumped below.' >&2
+            false
+          fi
           test "$status" -eq 0
 
       # Closing the window is the only stop there is now, so a restart is: close
@@ -222,14 +239,17 @@ jobs:
       # The same question with the weights now cached, through a server that was
       # closed and started again underneath it: this is what proves a fresh server
       # still lists the preset by name, loads it when the request names it, and
-      # does not download it a second time.
+      # does not download it a second time. `--no-tools` for the reason above.
       - name: pi Hello world after a restart
         if: steps.sandbox.outputs.ok == 'yes'
         run: |
           set -o pipefail
-          pixi r osint-pi -- --model LFM2.5-230M -p 'Hello world' | tee pi-smoke-restart.log
+          pixi r osint-pi -- --no-tools --model LFM2.5-230M -p 'Hello world' | tee pi-smoke-restart.log
           status=$?
-          test -s pi-smoke-restart.log
+          if [[ ! -s pi-smoke-restart.log ]]; then
+            echo 'The assistant printed no answer; its session is dumped below.' >&2
+            false
+          fi
           test "$status" -eq 0
 
       # Close it on failure too: a server left running would keep the job alive.
@@ -251,4 +271,25 @@ jobs:
             else
               echo "No inference log at $log."
             fi
+          done
+
+      # Print mode writes the last assistant text to stdout and Pi's own errors
+      # to stderr, and the session file records what that last message actually
+      # was - an answer, a tool result, or an error object that never reached
+      # either stream. It is the one place a run that failed quietly explains
+      # itself, and it tolerates a missing file, which is what a run that died
+      # before its first request looks like. The last message of the two newest
+      # sessions is enough: one session per invocation, and each session's first
+      # entry is the prompt, which the inference log already accounts for.
+      - name: Dump the assistant session
+        if: always()
+        run: |
+          sessions="$HOME/.local/state/osint-ai/agent-home/.pi/agent/sessions"
+          mapfile -t files < <(ls -t "$sessions"/*/*.jsonl 2>/dev/null | head -2)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No Pi session under $sessions: the assistant never got that far."
+          fi
+          for file in "${files[@]}"; do
+            echo "== $file, last message, truncated =="
+            tail -n 1 "$file" | cut -c1-4000
           done

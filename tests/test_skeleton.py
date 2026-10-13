@@ -220,6 +220,13 @@ class ConfigurationTests(unittest.TestCase):
         `pi`, so a sandbox that cannot start fails the job instead of passing
         quietly. The model it asks for is the one preset `models.ini` marks as
         unit-test only. The Windows half of the same design is a job in ci.yml.
+
+        It asks that model without tools. A 350M preset cannot drive the coding
+        tools: it calls `read` and `edit` with arguments that fail validation,
+        reads its own errors and calls another one, which costs a request per
+        round trip on a two-core runner and leaves the job's verdict to whatever
+        that model put in its last message. One question, no tools, one answer is
+        what makes this a test of the sandbox and the server.
         """
         workflow = (ROOT / ".github/workflows/llamacpp.yml").read_text()
         self.assertIn("runs-on: ubuntu-latest", workflow)
@@ -231,7 +238,12 @@ class ConfigurationTests(unittest.TestCase):
         # by program name: a command-line pattern would match the step that runs
         # the pattern.
         self.assertIn("pkill -x llama-server", workflow)
-        self.assertIn("pixi r osint-pi -- --model LFM2.5-230M", workflow)
+        # Asked without tools, and that is the point rather than a detail: the
+        # preset is a 350M model that cannot drive them, so a job whose red state
+        # came from the model's last message not being text would prove nothing
+        # about the sandbox. Both invocations, so neither half drifts back.
+        self.assertIn("pixi r osint-pi -- --no-tools --model LFM2.5-230M", workflow)
+        self.assertNotIn("pixi r osint-pi -- --model", workflow)
         # Loading the preset is its own step, before the assistant asks: a cold
         # run downloads the weights, and that wait belongs to an explicit load
         # rather than to the assistant's first request.

@@ -165,9 +165,13 @@ job that does install and run local inference on Linux:
   through `/models/load` and waits for the status to say `loaded`, so the assistant's
   own request is not the thing paying for a cold download. It then asks the real
   assistant, through `pixi r osint-pi` and therefore inside bubblewrap, for an
-  answer, closes the server with `pkill -x llama-server` and starts it again, asks
-  the same question with the weights now cached, and dumps what the server printed
-  either way. A missing model, a dead server or a sandbox
+  answer - with `--no-tools`, because the preset is a 350M model that cannot
+  drive the coding tools and every tool it calls is one more request on a
+  two-core runner. An answer to one question is what this half is asking for. It
+  then closes the server with `pkill -x llama-server` and starts it again, asks
+  the same question with the weights now cached, and dumps what the server
+  printed and what the assistant's session recorded, either way. A missing
+  model, a dead server or a sandbox
   that cannot start fails the job; there is no unsandboxed `pi` in it, and no
   `--no-sandbox` flag to reach for.
   Where the runner refuses unprivileged user namespaces *outright* the profile
@@ -176,10 +180,13 @@ job that does install and run local inference on Linux:
   sandbox is broken and the job fails. It never starts a bare `pi`.
 
   On a GitHub-hosted runner this job does reach the sandboxed half: the AppArmor
-  profile is written for the pinned binary there and Pi starts inside it - a
-  prompt answered with `Hello world! How can I assist you today?` on a runner with
-  no GPU is real evidence, not a claim. The `ci.yml` sandbox job still skips on
-  those runners, because it probes instead of installing the profile.
+  profile is written for the pinned binary there and Pi starts inside it - an
+  answer printed by Pi, out of what the model at the other end of the socket
+  said, on a runner with no GPU is real evidence, not a claim. The assertion is
+  that the answer exists and that Pi exited cleanly, not that the answer is
+  right: a 350M unit-test model answers with its own instructions and the
+  checkout's paths, which is all it is there for. The `ci.yml` sandbox job still
+  skips on those runners, because it probes instead of installing the profile.
 
 A green CI run does **not** prove: the sandbox's mount layout, environment
 scrubbing or read-only program checkout (Pi really does start inside the pinned
@@ -189,7 +196,8 @@ Windows installer, WSL provisioning, reboot, DrvFS mounts, desktop
 shortcuts, the firewall rule, the WSL-to-Windows link the assistant actually uses
 for local models, GPU offload or that a preset fits the user's PC (the smoke test
 proves CPU inference of one 350M test model; the Windows job proves the server
-starts, not that a model loads), OpenRouter OAuth, delegation, or that a
+starts, not that a model loads), tool calling by a local model - the smoke test
+asks with `--no-tools` for that reason - OpenRouter OAuth, delegation, or that a
 non-technical user can follow the README. Those stay in the matrix
 below.
 
