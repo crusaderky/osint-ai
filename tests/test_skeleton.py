@@ -70,9 +70,13 @@ class ConfigurationTests(unittest.TestCase):
         extension pins - exact versions, the recipe's plugin list - is the
         recipe's own business and is not mirrored here.
         """
-        locked = set(
-            re.findall(r"pi-coding-agent-(\d+\.\d+\.\d+)", (ROOT / "pixi.lock").read_text())
-        )
+        lock_text = (ROOT / "pixi.lock").read_text()
+        # Count only what the lock resolves into an environment. A recipe record
+        # further down the file also names the packages of the cached build
+        # environment it was built in, which may legitimately differ from the
+        # runtime resolution.
+        environments = lock_text[: lock_text.index("\npackages:\n")]
+        locked = set(re.findall(r"pi-coding-agent-(\d+\.\d+\.\d+)", environments))
         self.assertEqual(len(locked), 1, "the lock must resolve exactly one Pi version")
         version = tuple(int(part) for part in locked.pop().split("."))
         self.assertGreaterEqual(
