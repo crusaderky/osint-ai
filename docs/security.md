@@ -103,7 +103,13 @@ is guidance only.
    patterns from `model-shortlist.json` in the **program** checkout - read-only in
    WSL, so the assistant cannot widen its own model list from its own checkout -
    and keeps every model the user saved, so a shortlist update cannot remove a
-   sign-in's model.
+   sign-in's model; it puts them after the shortlist, because Pi preselects the
+   first entry and the shortlist is the project's recommendation. The one
+   deletion it makes is bounded by the same read-only file: entries named in that
+   file's `removedModels` list go, along with a saved `defaultModel` naming one of
+   them, and nothing else in the home's settings is dropped. A model the assistant
+   could withdraw is therefore only ever one the maintainer wrote down in a
+   checkout it cannot write.
    `~/.pi/agent/models.json` is generated the same way, for the same reason: it
    names the local model server, whose address is loopback on plain Linux and the
    Windows host inside WSL, and WSL hands a different address out after a restart.

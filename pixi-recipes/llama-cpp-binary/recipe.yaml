@@ -25,12 +25,12 @@ context:
   fork: ggml-org/llama.cpp
   # The upstream release tag: `b` and the build number, which is what the
   # released assets are named after.
-  version: b11514
+  version: b12038
 
 package:
   name: llama-cpp
-  # The build number on its own: conda wants a version, and `b11514` is a tag.
-  version: "11514"
+  # The build number on its own: conda wants a version, and `b12038` is a tag.
+  version: "12038"
 
 source:
   # Every hash is the SHA-256 GitHub publishes for that release asset. A wrong
@@ -39,19 +39,19 @@ source:
   - if: linux and backend == "cpu"
     then:
       url: https://github.com/${{ fork }}/releases/download/${{ version }}/llama-${{ version }}-bin-ubuntu-x64.tar.gz
-      sha256: b2b617fb28e9d1444235c30bb09a3704789a1840e16ead58a5f7be6eeae8beef
+      sha256: 46b89b9a84c7a0fa46e89911034c4f6d3024150cb5d477e1426b921f81f4ddab
   - if: linux and backend == "vulkan"
     then:
       url: https://github.com/${{ fork }}/releases/download/${{ version }}/llama-${{ version }}-bin-ubuntu-vulkan-x64.tar.gz
-      sha256: 0056cbd32440e646bbe8e3a3f797bf2aef15c9dd5ebf77b9b19830434c1ae541
+      sha256: ef4a048464f4c3b03ea3862f40bf97b9e4045c381c950d8f552540e8162d40cc
   - if: win and backend == "cpu"
     then:
       url: https://github.com/${{ fork }}/releases/download/${{ version }}/llama-${{ version }}-bin-win-cpu-x64.zip
-      sha256: 5a1d6ba1b414ab0234b12e29d911b3b8fe63051b4455215e184cf74870eac596
+      sha256: e5446ab68d5c84daf0da925c815074d89766bafb28db520947e76878a8e06b72
   - if: win and backend == "vulkan"
     then:
       url: https://github.com/${{ fork }}/releases/download/${{ version }}/llama-${{ version }}-bin-win-vulkan-x64.zip
-      sha256: e1eaddcde761b1f839b9c6d5924b97f2698fba22068ca3b63f129c3caf55b88f
+      sha256: 32cb894e0d3c7a042876f97315f427fd9a60fbe60f3cfaa20bb1626fed24cd08
 
 build:
   number: 0

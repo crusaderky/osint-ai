@@ -217,20 +217,30 @@ class ConfigurationTests(unittest.TestCase):
         """The shortlist is data, validated as data; the wiring has its own tests.
 
         Entries are Pi model references (``provider/modelId``), without
-        duplicates. A ``llama.cpp/`` entry must be a preset the server actually
+        duplicates, and the two lists never name the same model: an entry in
+        both would be added by the merge and then deleted by the withdrawal, so
+        a shortlist that contradicts itself is a bug rather than a preference.
+        A ``llama.cpp/`` entry must be a preset the server actually
         has, and the unit-test preset must never be offered to a person doing
         real work.
         """
-        patterns = json.loads((ROOT / "model-shortlist.json").read_text())["enabledModels"]
+        shortlist = json.loads((ROOT / "model-shortlist.json").read_text())
+        patterns = shortlist["enabledModels"]
+        withdrawn = shortlist.get("removedModels", [])
         self.assertTrue(patterns)
-        self.assertEqual(
-            patterns,
-            list(dict.fromkeys(patterns)),
-            "the shortlist offers the same model twice",
+        for name, entries in (("enabledModels", patterns), ("removedModels", withdrawn)):
+            self.assertEqual(
+                entries,
+                list(dict.fromkeys(entries)),
+                f"{name} names the same model twice",
+            )
+            for pattern in entries:
+                # Pi matches `provider/modelId`; a bare id is ambiguous across providers.
+                self.assertRegex(pattern, r"^[^/\s]+/\S+$", f"{pattern} is not provider/modelId")
+        self.assertFalse(
+            set(patterns) & set(withdrawn),
+            "the shortlist offers a model and withdraws it in the same file",
         )
-        for pattern in patterns:
-            # Pi matches `provider/modelId`; a bare id is ambiguous across providers.
-            self.assertRegex(pattern, r"^[^/\s]+/\S+$", f"{pattern} is not provider/modelId")
         hosted = json.loads((ROOT / "pixi-recipes/pi-home/models.json").read_text())
         presets = {f"llama.cpp/{model['id']}" for model in hosted["providers"]["llama.cpp"]["models"]}
         for pattern in patterns:
@@ -238,6 +248,42 @@ class ConfigurationTests(unittest.TestCase):
                 self.assertIn(pattern, presets, f"{pattern} has no llama.cpp preset")
         self.assertIn("llama.cpp/MiniCPM5-2B", patterns)
         self.assertNotIn("llama.cpp/LFM2.5-230M", patterns)
+
+    def test_readme_carries_the_shortlist_in_order_and_never_a_withdrawn_model(self):
+        """The table a person reads is the list the launcher writes.
+
+        README is where a non-programmer chooses a model, so every model the
+        launcher offers has to appear in its table, in the order the shortlist
+        lists them - the first entry is the one Pi preselects. A withdrawn model
+        must not appear at all: pointing a reader at a model the assistant is
+        configured to refuse is worse than saying nothing about it.
+        """
+        shortlist = json.loads((ROOT / "model-shortlist.json").read_text())
+        readme = (ROOT / "README.md").read_text()
+        table = readme.split("### Choose a model")[1].split("As a rule of thumb")[0]
+        positions = []
+        for pattern in shortlist["enabledModels"]:
+            # README's table names a model by the last part of its reference,
+            # which is what a person types into `/model`: the shortlist's
+            # `openrouter/z-ai/glm-5.3-flash` appears there as `glm-5.3-flash`.
+            short = pattern.rsplit("/", 1)[-1]
+            match = re.search(rf"`{re.escape(short)}`", table)
+            self.assertIsNotNone(match, f"README's model table does not list {short}")
+            positions.append(match.start())
+        self.assertEqual(
+            positions,
+            sorted(positions),
+            "README's table lists the shortlist in a different order than the launcher",
+        )
+        for pattern in shortlist.get("removedModels", []):
+            short = pattern.rsplit("/", 1)[-1]
+            self.assertIsNone(
+                # A withdrawn id is a prefix of its successors, so a match has to
+                # end there: `deepseek-v4.1-flash` must not be found inside
+                # `deepseek-v4.1-flash-1017`.
+                re.search(rf"{re.escape(short)}(?![\w.-])", readme),
+                f"README names a model the project withdrew: {short}",
+            )
 
     def test_installer_parse_test_survives_a_crlf_checkout(self):
         """`*.ps1` is checked out with CRLF, so the Bash check must drop the CR.
@@ -707,6 +753,24 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(int(context.group(1)), model["contextWindow"], model["id"])
             self.assertNotIn("samplingParams", model, model["id"])
 
+    def test_the_extension_recipe_pins_every_plugin(self):
+        """One list of plugin pins, each with an exact version.
+
+        The pins live in `recipe.yaml` and reach both build scripts through one
+        variable, and `pi install npm:<name>@<version>` writes the packaged
+        `settings.json` from them - so nothing else in the package repeats a
+        version and a bump cannot leave the two disagreeing. Every entry has to
+        carry a version: an unpinned plugin would install whatever is current at
+        build time, which is not a reproducible product.
+        """
+        recipe = (ROOT / "pixi-recipes/pi-extensions/recipe.yaml").read_text()
+        plugins = re.search(r"PLUGINS: >-\n((?:\s+\S+@\S+\n)+)", recipe).group(1).split()
+        self.assertTrue(plugins, "the recipe lists no plugins")
+        for entry in plugins:
+            self.assertRegex(entry, r"^(@?[^/@]+/)?[^/@]+@\d+\.\d+\.\d+$", entry)
+            self.assertEqual(recipe.count(entry), 1, f"{entry} is pinned in two places")
+        self.assertEqual(plugins, list(dict.fromkeys(plugins)), "a plugin is listed twice")
+
     def test_the_inference_recipe_ships_the_vulkan_build(self):
         """One recipe, Vulkan on both platforms, digests pinned, no fork options.
 
@@ -720,6 +784,22 @@ class ConfigurationTests(unittest.TestCase):
         recipe = (ROOT / "pixi-recipes/llama-cpp-binary/recipe.yaml").read_text()
         self.assertIn("fork: ggml-org/llama.cpp", recipe)
         self.assertIn("sha256:", recipe)
+        # The tag and the conda version are bumped together by hand, so a half
+        # update is a recipe whose assets and package disagree.
+        tag = re.search(r"(?m)^  version: (b\d+)$", recipe).group(1)
+        self.assertEqual(
+            re.search(r'(?m)^  version: "(\d+)"$', recipe).group(1),
+            tag[1:],
+            "the package version and the release tag name different builds",
+        )
+        self.assertEqual(
+            recipe.count("url: https://github.com/"), 4, "an asset is missing"
+        )
+        self.assertEqual(recipe.count("sha256:"), 4, "a pinned asset has no digest")
+        # Every URL resolves the tag through the variable: a literal tag left in
+        # one of them would keep downloading the old release after a bump.
+        self.assertNotIn(f"download/{tag}", recipe)
+        self.assertEqual(recipe.count("releases/download/${{ version }}/"), 4)
         # No asset of a fork: the fork's preset options are not implemented on
         # the build this project ships (see the recipe's own comment).
         self.assertNotIn("beellama", recipe)
@@ -1018,14 +1098,19 @@ class PiEntryTests(unittest.TestCase):
         self.shortlist(root, ["llama.cpp/MiniCPM5-2B"])
         return prefix, bundled
 
-    def shortlist(self, root: Path, patterns):
+    def shortlist(self, root: Path, patterns, withdrawn=None):
         """Write the checkout's `model-shortlist.json`.
 
         The file is part of the checkout, so the entry script reads it without
-        asking whether it is there.
+        asking whether it is there. `withdrawn` is the optional `removedModels`
+        list; leaving it out writes the file the way a shortlist with nothing to
+        delete looks, which is what the entry script must also cope with.
         """
         file = root / sandbox.MODEL_SHORTLIST_NAME
-        file.write_text(json.dumps({"enabledModels": patterns}))
+        data = {"enabledModels": patterns}
+        if withdrawn is not None:
+            data["removedModels"] = withdrawn
+        file.write_text(json.dumps(data))
         return file
 
     def test_entry_points_the_models_at_the_deployment_server(self):
@@ -1088,7 +1173,7 @@ class PiEntryTests(unittest.TestCase):
             self.shortlist(
                 root,
                 [
-                    "openrouter/deepseek/deepseek-v4.1-flash",
+                    "openrouter/deepseek/deepseek-v4.1-flash-1017",
                     "openrouter/xiaomi/mimo-v2.6-pro",
                     "llama.cpp/MiniCPM5-2B",
                 ],
@@ -1098,11 +1183,13 @@ class PiEntryTests(unittest.TestCase):
             self.assertEqual(
                 settings["enabledModels"],
                 [
-                    # What the user had stays first, in the user's own spelling.
-                    "anthropic/claude-opus-4-8",
+                    # The shortlist, in the shortlist's own order, then what the
+                    # user added - and `mimo-v2.6-pro` once, where the shortlist
+                    # puts it.
+                    "openrouter/deepseek/deepseek-v4.1-flash-1017",
                     "openrouter/xiaomi/mimo-v2.6-pro",
-                    "openrouter/deepseek/deepseek-v4.1-flash",
                     "llama.cpp/MiniCPM5-2B",
+                    "anthropic/claude-opus-4-8",
                 ],
             )
             self.assertEqual(settings["theme"], "keep me", "a user setting was overwritten")
@@ -1114,6 +1201,158 @@ class PiEntryTests(unittest.TestCase):
                 "the shortlist was appended again",
             )
             self.assertEqual(stat.S_IMODE((live / "settings.json").stat().st_mode), 0o600)
+
+    def test_the_shortlist_leads_the_scoped_list(self):
+        """The order of `enabledModels` is the order of Pi's scoped model tab.
+
+        Pi preselects the first model of that tab, and README promises the first
+        model of the shortlist, so the launcher writes the shortlist first, in the
+        shortlist's order, with the models the person added themselves after it -
+        whatever order those arrived in, and whatever the file looked like before.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            live = home / ".pi/agent"
+            live.mkdir(parents=True)
+            # An older launch's result: the user's own choice at the front, which
+            # is exactly what a launch must not leave, because it would become the
+            # model every session starts on.
+            (live / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "enabledModels": [
+                            "anthropic/claude-opus-4-8",
+                            "openrouter/xiaomi/mimo-v2.6-flash",
+                            "openrouter/z-ai/glm-5.3-flash",
+                            "openrouter/deepseek/deepseek-v4.1-flash-1017",
+                        ]
+                    }
+                )
+            )
+            prefix, _bundled = self.bundled_prefix(root)
+            self.shortlist(
+                root,
+                [
+                    "openrouter/deepseek/deepseek-v4.1-flash-1017",
+                    "openrouter/z-ai/glm-5.3-flash",
+                    "llama.cpp/MiniCPM5-2B",
+                ],
+            )
+            self.run_entry(root, prefix, home)
+            self.assertEqual(
+                json.loads((live / "settings.json").read_text())["enabledModels"],
+                [
+                    "openrouter/deepseek/deepseek-v4.1-flash-1017",
+                    "openrouter/z-ai/glm-5.3-flash",
+                    "llama.cpp/MiniCPM5-2B",
+                    "anthropic/claude-opus-4-8",
+                    "openrouter/xiaomi/mimo-v2.6-flash",
+                ],
+            )
+
+    def test_entry_deletes_the_models_the_project_took_back(self):
+        """`removedModels` is the one list that deletes.
+
+        The merge is additive, so a model the maintainer withdrew - a release
+        pulled from the catalogue, a model that turned out to be unusable - would
+        otherwise sit in the model menu until the person stopped using the product.
+        Both the full reference and the same reference with the provider stripped
+        off go, because `/model` writes either spelling; a model that merely
+        shares a prefix with a withdrawn one stays.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            live = home / ".pi/agent"
+            live.mkdir(parents=True)
+            (live / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "enabledModels": [
+                            "openrouter/deepseek/deepseek-v4.1-flash",
+                            # The same model as `/model` may have saved it.
+                            "deepseek/deepseek-v4.1-flash",
+                            "anthropic/claude-opus-4-8",
+                            # Shares a name with the withdrawn model; not it.
+                            "openrouter/deepseek/deepseek-v4.1-flash-1017",
+                        ]
+                    }
+                )
+            )
+            prefix, _bundled = self.bundled_prefix(root)
+            self.shortlist(
+                root,
+                [
+                    "openrouter/deepseek/deepseek-v4.1-flash-1017",
+                    "llama.cpp/MiniCPM5-2B",
+                ],
+                withdrawn=["openrouter/deepseek/deepseek-v4.1-flash"],
+            )
+            self.run_entry(root, prefix, home)
+            settings = json.loads((live / "settings.json").read_text())
+            self.assertEqual(
+                settings["enabledModels"],
+                [
+                    "openrouter/deepseek/deepseek-v4.1-flash-1017",
+                    "llama.cpp/MiniCPM5-2B",
+                    "anthropic/claude-opus-4-8",
+                ],
+            )
+            # Deleting is not re-adding: the withdrawn model is not put back.
+            self.run_entry(root, prefix, home)
+            self.assertEqual(
+                json.loads((live / "settings.json").read_text())["enabledModels"],
+                settings["enabledModels"],
+                "the withdrawn model came back on the second launch",
+            )
+
+    def test_entry_clears_a_saved_default_that_names_a_withdrawn_model(self):
+        """Pi resolves the saved default before the scoped list.
+
+        Someone picked a model with `/model` and Pi recorded it as the default; if
+        that model is later withdrawn, leaving the setting would start every
+        session on the model the project took back out. Their other settings, and
+        a default that still names a model the shortlist offers, are left alone.
+        """
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home"
+            live = home / ".pi/agent"
+            live.mkdir(parents=True)
+            (live / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "defaultProvider": "openrouter",
+                        "defaultModel": "deepseek/deepseek-v4.1-flash",
+                        "theme": "keep me",
+                    }
+                )
+            )
+            prefix, _bundled = self.bundled_prefix(root)
+            self.shortlist(
+                root,
+                ["openrouter/deepseek/deepseek-v4.1-flash-1017"],
+                withdrawn=["openrouter/deepseek/deepseek-v4.1-flash"],
+            )
+            self.run_entry(root, prefix, home)
+            settings = json.loads((live / "settings.json").read_text())
+            self.assertNotIn("defaultModel", settings, "a withdrawn model is still the default")
+            self.assertNotIn("defaultProvider", settings)
+            self.assertEqual(settings["theme"], "keep me", "a user setting was overwritten")
+            # A default naming a model still offered survives, unchanged.
+            (live / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "defaultProvider": "openrouter",
+                        "defaultModel": "deepseek/deepseek-v4.1-flash-1017",
+                    }
+                )
+            )
+            self.run_entry(root, prefix, home)
+            settings = json.loads((live / "settings.json").read_text())
+            self.assertEqual(settings["defaultModel"], "deepseek/deepseek-v4.1-flash-1017")
+            self.assertEqual(settings["defaultProvider"], "openrouter")
 
     def test_entry_reads_the_shortlist_from_the_checkout_that_owns_the_environment(self):
         """The file belongs to the checkout, and the environment prefix names it.

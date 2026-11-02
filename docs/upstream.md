@@ -8,10 +8,13 @@ Adapted from the adjacent `pixi-llm-recipes` checkout supplied for this task:
   section so the cached Hugging Face blob of a preset is not listed a second time.
   Large/experimental presets are kept; runtime capacity is not guaranteed, and
   weights load only when a model is chosen.
-- `llamacpp-binary-vulkan`: upstream ggml-org/llama.cpp, release `b11514`, on the
+- `llamacpp-binary-vulkan`: upstream ggml-org/llama.cpp, release `b12038`, on the
   Vulkan build on both platforms this project supports: linux-64 (the plain
   Linux install, and WSL if somebody really wants a server there) and win-64,
   where llama.cpp now runs natively, outside WSL, so it reaches the GPU directly.
+  The tag and the four asset digests are pinned in the recipe and refreshed by
+  hand whenever `pixi update` is run: GitHub publishes a SHA-256 per release
+  asset, and a digest that does not match the tag's asset fails the install.
   Kept the checksum-verified rattler-build `source` (each hash is the SHA-256
   GitHub publishes for that asset) and the `backend` variant matrix, dropped
   CUDA, ROCm, SYCL and arm64, and took the reference recipe's `build.bat` so the
@@ -30,11 +33,12 @@ Adapted from the adjacent `pixi-llm-recipes` checkout supplied for this task:
   is slower. `models.ini` now quantizes both K and V to `q4_0`, which upstream
   documents for both halves.
 - `pi`: conda-forge pi-coding-agent, floating in the manifest and locked at
-  1.0.2; Linux only. Raised from 0.85.1 for `pi-subagents`, whose peer
+  1.4.0; Linux only. Raised from
+  0.85.1 for `pi-subagents`, whose peer
   requirement is `@earendil-works/pi-ai >=0.86.1`; that floor is also the host
   baseline for its dynamic tool activation. A future re-lock below it breaks
   delegation, which a test in `tests/test_skeleton.py` now checks.
-  Pi 1.0.2 loads a context file from the working directory and from every parent
+  Pi 1.4 loads a context file from the working directory and from every parent
   directory, and offers no setting to limit that walk: `--no-context-files` is
   all-or-nothing and `AGENTS.override.md` replaces a file only in its own
   directory. That is why `scripts/pi-entry.sh` disables discovery and names
@@ -42,8 +46,11 @@ Adapted from the adjacent `pixi-llm-recipes` checkout supplied for this task:
   relying on the mount layout. Re-check this on the next Pi upgrade: if Pi ever
   learns a ceiling for the walk, the flags can go.
 - `pi-extensions`: retained pinned pi-web-access, pi-token-speed, and
-  ask-user-question, and added pinned pi-intercom 0.16.1 and pi-subagents
-  0.76.0 for delegation. Dropped developer-only btw/caveman/usage extensions and
+  ask-user-question, and added pinned pi-intercom and pi-subagents
+  for delegation. The versions in `pixi-recipes/pi-extensions/recipe.yaml` are the
+  only place they are written, and a test asserts each appears exactly once; a
+  bump of a plugin version is a rebuild of the packaged `settings.json`, which
+  `pi install` derives from those pins. Dropped developer-only btw/caveman/usage extensions and
   rtk command rewriting. Removed shell and Windows-specific build variants, and
   removed pi-llama-cpp: Pi's own llama.cpp provider and `/llama` command do the
   same job, and the launcher points it at the server by generating

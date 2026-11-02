@@ -336,8 +336,8 @@ outside the sandbox.
 | `/home/osint` | `HOME`, a bind of the persistent agent home (mode `0700`): Pi sign-in (`~/.pi/agent/auth.json`), sessions, settings, caches. Host path in **both** deployments: `~/.local/state/osint-ai/agent-home` of the Linux user that runs the launcher - `/home/osint/.local/state/osint-ai/agent-home` in WSL. Override with `OSINT_STATE_DIR` |
 | `/home/osint/.pi/agent/keybindings.json`, `/home/osint/.pi/web-search.json` | The environment's copies, bound read-only over the home: always current, never rewritten by the agent or fossilised by an upgrade |
 | `/home/osint/.pi/agent/AGENTS.md` | Not mounted and not shipped. The assistant's instructions are `workspace/AGENTS.md` in its own checkout, named on Pi's command line; Pi's context-file discovery is off, so neither this path nor the checkout root's `AGENTS.md` is loaded. A copy left there by an older version is still renamed to `AGENTS.md.stale` on the next launch, so the persistent home does not keep a stale guide |
-| `/home/osint/.pi/agent/settings.json` | Generated each launch in the home, because Pi writes settings there; `packages` and `skills` are rewritten by the launcher, and `enabledModels` is extended with the model shortlist |
-| `model-shortlist.json` (project root) | The models the assistant is offered, as `provider/modelId` patterns. `scripts/pi-entry.sh` reads it from the **program** checkout - `/opt/osint-ai/project/model-shortlist.json` in WSL, read-only, and `/osint-ai/model-shortlist.json` on plain Linux - and merges it into `~/.pi/agent/settings.json` additively: entries the user saved are kept, missing ones are added, nothing is duplicated |
+| `/home/osint/.pi/agent/settings.json` | Generated each launch in the home, because Pi writes settings there; `packages` and `skills` are rewritten by the launcher, `enabledModels` is rewritten as the shortlist in its own order followed by whatever the user added (minus its `removedModels` entries), and a `defaultModel`/`defaultProvider` pair naming a removed model is dropped |
+| `model-shortlist.json` (project root) | The models the assistant is offered, as `provider/modelId` patterns, plus `removedModels`: the models the project took back out. `scripts/pi-entry.sh` reads it from the **program** checkout - `/opt/osint-ai/project/model-shortlist.json` in WSL, read-only, and `/osint-ai/model-shortlist.json` on plain Linux - and merges `enabledModels` into `~/.pi/agent/settings.json` additively and in one order: the shortlist first, in its own order, then the entries the user added, nothing duplicated, and anything named by `removedModels` deleted from that list |
 | `/home/osint/.pi/agent/models.json` | Generated each launch from `pixi-recipes/pi-home/models.json`, because the address of the local model server differs per deployment: loopback on Linux, the Windows host inside WSL, and WSL hands a new address out whenever it restarts |
 | `/home/osint/.pi/agent/intercom` | Per-launch tmpfs: the pi-intercom broker socket, PID file and queued mail |
 | `~/.cache/huggingface/hub`, `%USERPROFILE%\.cache\huggingface\hub` | Downloaded model weights: the standard Hugging Face cache, inference only and outside the sandbox, under the `osint` user's home in WSL and the same path on plain Linux, under the Windows user's profile for the native server. Shared with anything else on the PC that downloads from Hugging Face, so weights are not duplicated |
@@ -522,14 +522,23 @@ is `model-shortlist.json` in the project root, and `scripts/pi-entry.sh` merges 
 project file rather than a shipped setting because it is the part that goes stale -
 `README.md` says when it was last checked - and because the merge is additive: a
 model the user saved with `/model` survives it, an entry already there is not added
-twice, and nothing in the launcher removes a model. The entry script derives the
+twice, and the list is written as the shortlist first in the shortlist's order with
+the user's own additions behind it. Pi preselects the first entry of the scoped tab,
+so that order is the recommendation being applied, not a cosmetic detail. The file's
+other list, `removedModels`, is the one thing the launcher deletes:
+a model the maintainer took back out is dropped from `enabledModels` - under the
+full `provider/modelId` reference and under the same reference with the provider
+stripped off, because `/model` writes either - and a `defaultModel` naming it is
+cleared, since Pi resolves the saved default before the scoped list and would
+otherwise start every session on the withdrawn model. The entry script derives the
 checkout from the environment prefix (`<checkout>/.pixi/envs/<name>`, three levels
 up) and reads the file without asking whether it is there: it is part of the
 checkout, like `pixi.toml`, and in WSL that checkout is the read-only program mount,
 so the assistant cannot widen its own model list. On plain Linux the checkout is the
-maintainer's own and writable by design. A test keeps its `llama.cpp/...` entries in
+maintainer's own and writable by design. Tests keep its `llama.cpp/...` entries in
 step with `pixi-recipes/pi-home/models.json`, so the shortlist never offers a local
-model the server has no preset for, and never the unit-test preset.
+model the server has no preset for and never the unit-test preset, and keep
+`README.md`'s model table in the shortlist's order with no withdrawn model named.
 
 Starting the server downloads no weights: llama.cpp loads a model, and downloads it
 if necessary, when a request names it - which is also why the CI smoke test loads

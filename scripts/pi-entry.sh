@@ -53,11 +53,50 @@ settings['skills'] = defaults.get('skills', [])
 # The model shortlist is a project file - `model-shortlist.json` in the program
 # checkout - because it is what the maintainer updates when the models worth
 # using change. Merged on every launch, and merged additively: a model the user
-# saved with /model stays, an entry already in the list is not added again, and
-# nothing here removes a model. `dict.fromkeys` over both lists is what keeps the
-# first-seen order and drops the repeats.
-wanted = json.loads(Path(os.environ['OSINT_MODEL_SHORTLIST']).read_text())['enabledModels']
-settings['enabledModels'] = list(dict.fromkeys([*settings.get('enabledModels', []), *wanted]))
+# saved with /model stays and an entry already in the list is not added again.
+# The shortlist comes first, in its own order, and whatever the user added
+# afterwards follows it: the first entry is the model Pi preselects, so the order
+# is the recommendation, not decoration. `dict.fromkeys` over the two lists keeps
+# that first-seen order and drops the repeats, which is also what makes a second
+# launch change nothing.
+# `removedModels` is the one list that does remove something. A model the project
+# took back out - a release that was pulled, a model that turned out to be unusable -
+# would otherwise stay in the assistant's settings forever, because the merge above
+# never deletes, and the person would keep meeting it in the model menu.
+shortlist = json.loads(Path(os.environ['OSINT_MODEL_SHORTLIST']).read_text())
+wanted = shortlist['enabledModels']
+withdrawn = shortlist.get('removedModels', [])
+
+
+def is_withdrawn(entry):
+    """True when a saved entry names one of the withdrawn models.
+
+    `provider/modelId` is the spelling the shortlist writes, and `/model` can
+    leave the same reference with the provider stripped off, so both are
+    compared. A bare id with no `/` is not matched: it names no provider, and
+    deleting it could take away a different provider's model of the same name.
+    """
+    for gone in withdrawn:
+        if entry == gone or entry == gone.partition('/')[2]:
+            return True
+    return False
+
+
+settings['enabledModels'] = [
+    entry
+    for entry in dict.fromkeys([*wanted, *settings.get('enabledModels', [])])
+    if not is_withdrawn(entry)
+]
+# Pi resolves `defaultModel` before the scoped list, so a saved default naming a
+# withdrawn model would still start the assistant on it. Dropping the pair puts
+# Pi back on the first model of the shortlist, which is what README describes.
+default = settings.get('defaultModel')
+if default:
+    provider = settings.get('defaultProvider')
+    reference = f"{provider}/{default}" if provider else default
+    if is_withdrawn(reference):
+        settings.pop('defaultModel', None)
+        settings.pop('defaultProvider', None)
 
 settings_file.write_text(json.dumps(settings, indent=2) + '\n')
 os.chmod(settings_file, 0o600)

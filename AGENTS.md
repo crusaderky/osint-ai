@@ -21,7 +21,7 @@ verifiable solutions and explain results in plain language.
 | `windows/` | Everything only the Windows deployment uses: `Install.ps1` (the installer, fetched from the published `main` by the README's one-liner), `provision-wsl.sh`, `install-runtime.sh` (the one list of root-owned files), `update-installation.sh` (the WSL half of the **Update OSINT AI** icon), the boot mount helper, and `launchers/` (the copies installed to `/usr/local/bin`). The bash scripts in here run inside the WSL distro the installer creates. |
 | `pixi-recipes/` | Local build recipes: Pi, extensions, the bundled home configuration, the Vulkan llama.cpp binary. |
 | `models.ini` | Inference presets snapshot used by the installed runtime. `LFM2.5-230M` is unit-test only: the CI smoke test asks that preset, nothing else uses it. The same preset names are listed in `pixi-recipes/pi-home/models.json`, which the launcher turns into the assistant's model list; a test keeps the two in step. |
-| `model-shortlist.json` | The models the assistant is offered. `scripts/pi-entry.sh` merges its `enabledModels` list into the agent's `~/.pi/agent/settings.json` on every start, additively: missing entries are added, a model the user saved stays, nothing is duplicated. Read from the program checkout, so on Windows the agent cannot widen its own model list. Current as of 2026-10-10 and expected to change. |
+| `model-shortlist.json` | The models the assistant is offered. `scripts/pi-entry.sh` merges its `enabledModels` list into the agent's `~/.pi/agent/settings.json` on every start, additively and in a fixed order: the shortlist first, in its own order, then whatever the user added afterwards, with nothing duplicated. Its `removedModels` list is the one exception: an entry there is deleted from that same list, and a saved `/model` default naming it is cleared, because Pi resolves the default before the scoped list. Read from the program checkout, so on Windows the agent cannot widen its own model list. Current as of 2026-11-02 and expected to change. |
 | `docs/` | `development.md`, `security.md`, `testing.md`, `upstream.md`. |
 | `tests/` | Linux/Python tests plus the PowerShell installer parse test. |
 | `.github/workflows/ci.yml` | GitHub Actions CI: the unit suite in the locked `default` environment, the installer parse test, the bubblewrap smoke test where user namespaces work, and the native Windows inference job on `windows-latest` (the assistant's own environment is never installed on Windows). What it cannot prove is in `docs/testing.md`. |
@@ -222,7 +222,7 @@ dependencies; it must ask instead.
   package ships no copy of it, `~/.pi/agent/AGENTS.md` is not mounted into the
   agent home, and `scripts/pi-entry.sh` starts Pi with `--no-context-files` plus
   `--append-system-prompt /osint-ai/workspace/AGENTS.md`. Pi loads a context file
-  from its working directory *and from every parent directory*, and Pi 1.0.2 has
+  from its working directory *and from every parent directory*, and Pi 1.4 has
   no setting to limit that walk, so this file - which sits directly above the
   agent's working directory - is excluded by switching discovery off. Do not
   reintroduce a bind-mount shadow of it: `git status` in the agent's own checkout
@@ -252,9 +252,17 @@ dependencies; it must ask instead.
   are `provider/modelId`, the reference Pi matches, and a test keeps every
   `llama.cpp/...` entry in step with `pixi-recipes/pi-home/models.json` so the
   shortlist never offers a local model the server has no preset for - and never
-  the unit-test preset. Merging it into the agent's settings stays additive: the
-  launcher adds what is missing and removes nothing, because the user's own
-  `/model` choices live in that same list.
+  the unit-test preset. Merging it into the agent's settings stays additive,
+  because the user's own `/model` choices live in that same list: nothing is
+  dropped and nothing is added twice. The order is a decision, not a detail - Pi
+  preselects the first entry of the scoped list - so the launcher writes the
+  shortlist first in the shortlist's order and the user's additions after it.
+  `removedModels` is the deliberate exception, and the only thing the launcher
+  deletes from that home - a model the project took back out is removed from the
+  list, both spellings of it, and a saved default naming it is cleared so Pi falls
+  back to the first shortlist entry. The two lists must not name the same model,
+  and `README.md` has to carry the shortlist in the launcher's order and never a
+  withdrawn model; tests assert both.
 * Update `README.md`, `docs/` and `tests/` in the same change as behaviour.
   `docs/testing.md` lists what Linux tests cannot prove; do not imply Windows,
   GPU or OAuth behaviour from a green test run.

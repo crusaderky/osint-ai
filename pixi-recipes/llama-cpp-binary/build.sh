@@ -7,7 +7,7 @@ set -euo pipefail
 echo "Installing the ${BACKEND:-unknown} build of ${FORK:-unknown} ${VERSION:-unknown} into ${PREFIX}"
 
 # Depending on archive extraction, its single top-level directory may remain.
-# Upstream names it after the release tag, e.g. `llama-b11514`, so the directory
+# Upstream names it after the release tag, e.g. `llama-b12038`, so the directory
 # of the requested version is preferred over whatever an earlier build left in
 # the reused work directory.
 for extracted in "llama-${VERSION:-}" llama-b* llama; do

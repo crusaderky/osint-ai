@@ -112,15 +112,14 @@ available models by switching to "all".
 **Warning:** some models are wildly more expensive than others. The most expensive
 models (outside of the shortlist) will drain $5 in less than a minute!
 
-The shortlist is up to date as of **10 October 2026** and it will change over time as
+The shortlist is up to date as of **2 November 2026** and it will change over time as
 better and cheaper models appear:
 
 | Model | Suggested thinking level | Where it runs | Ballpark cost for a 1h session | Notes |
 | --- | --- | --- | --- | --- |
-| `glm-5.3-flash` | high **(not max)** | OpenRouter | $0.66 | Max thinking is much more expensive and not worth it |
-| `mimo-v2.6-pro` | high | OpenRouter | $0.90 | May or may not be worth the extra money |
-| `deepseek-v4.1-flash` | high or max | OpenRouter | $1.00 | Great coder, but it hallucinates a lot |
-| `mimo-v2.6-flash` | high | OpenRouter | $0.30 | Dumber than the others |
+| `deepseek-v4.1-flash-1017` | high or max | OpenRouter | $1.00 | By far the smartest model |
+| `glm-5.3-flash` | high **(not max)** | OpenRouter | $1.00 | Dumber than DeepSeek, but less likely to allucinate. Max thinking is much more expensive and not worth it. |
+| `mimo-v2.6-flash` | high | OpenRouter | $0.70 | *Substantially* dumber than DeepSeek, but cheaper |
 | `MiniCPM5-2B` | n/a | your PC | $0.01 (electricity) | *Much* dumber than the others; read [Use a local model](#use-a-local-model) |
 
 As a rule of thumb:

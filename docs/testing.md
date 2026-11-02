@@ -41,9 +41,13 @@ finds `.git` above the working directory, that `/etc/alternatives` is bound so
 `which` and `awk` work, that the program-owned `~/.pi` files are read-only mounts
 rather than copies and that a stale `~/.pi/agent/npm` link or a stale `skills`
 path is repaired, that the model shortlist in the project root is merged into the
-assistant's `enabledModels` additively (a model the user saved survives, an entry
-already there is not added twice, and the list is read from the checkout that owns
-the environment), actual bubblewrap filesystem isolation, Git inside the sandbox
+assistant's `enabledModels` additively and in a fixed order (the shortlist first in
+its own order, the models the user saved behind them, an entry already there not
+added twice, and the list read from the checkout that owns the environment), that
+its `removedModels` entries are deleted from that list in
+either spelling and a saved `defaultModel` naming one is cleared while a live
+default survives, and that `README.md`'s model table lists the shortlist in the
+launcher's order and names no withdrawn model, actual bubblewrap filesystem isolation, Git inside the sandbox
 (that `git status` works from Pi's own directory, and that a commit from
 inside succeeds, which is the documented consequence of a writable `.git`),
 CPU-versus-GPU backend selection, and the command line the runner hands to
