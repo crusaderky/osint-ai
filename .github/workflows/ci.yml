@@ -135,7 +135,10 @@ jobs:
       # GitHub-hosted runners block unprivileged user namespaces, so this job
       # reports itself as not run there. On a runner where namespaces work - a
       # self-hosted one, or a WSL/VM maintainer - it installs the real locked
-      # environment and starts Pi inside the sandbox.
+      # environment, starts Pi inside the sandbox and builds a PDF there with the
+      # packaged skill: the environment is mounted at a different path than the
+      # one it was installed at, so a tool that hard-codes that path fails there
+      # and nowhere else.
       - name: Report a runner that cannot sandbox
         if: steps.userns.outputs.ok != 'true'
         run: echo "::warning::unprivileged user namespaces are blocked on this runner, so the sandbox smoke test did not run. Run tests/smoke_pixi_sandbox.py where bubblewrap works."

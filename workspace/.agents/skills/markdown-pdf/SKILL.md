@@ -71,11 +71,14 @@ BUILD=/osint-ai/workspace/.agents/skills/markdown-pdf/scripts/build-pdf.sh
 * Images are referenced relative to the Markdown file
   (`![](images/map.png)`) and must live inside `workspace/`. An absolute Linux
   path is invisible in the PDF and to the user.
-* Character sets: DejaVu, Noto (including CJK) and Source Code Pro ship with
-  the project environment, so Latin, Greek, Cyrillic, Hebrew, Arabic, Devanagari
-  and CJK text all get glyphs. Right-to-left scripts are not laid out
-  right-to-left, so Hebrew and Arabic are readable but the punctuation sits
-  wrongly - say so if the user asked about one of those languages.
+* Character sets depend on the fonts the machine has; the stylesheet asks for
+  DejaVu. Latin, Greek and Cyrillic are normally covered, while Hebrew, Arabic,
+  Devanagari and CJK need a font that may not be installed. A character no font
+  covers is an empty box, and WeasyPrint reports `notdef glyph` for it (see
+  above): look at the rendered page before promising a script, and never claim
+  glyphs you have not seen. Right-to-left scripts are not laid out
+  right-to-left either, so Hebrew and Arabic are readable but the punctuation
+  sits wrongly - say so if the user asked about one of those languages.
 
 ## PDF to Markdown
 

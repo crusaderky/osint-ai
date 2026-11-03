@@ -635,6 +635,45 @@ class ConfigurationTests(unittest.TestCase):
             with self.subTest(program=program):
                 self.assertIn(package, dependencies)
 
+    def test_skill_scripts_do_not_run_environment_console_scripts(self):
+        """A Python entry point names the path it was installed at, and it moves.
+
+        The environment is installed in the program checkout and mounted at a
+        different path inside the sandbox, so `<env>/bin/weasyprint` - a script
+        whose shebang is the absolute install path - cannot be executed there.
+        pandoc reported the resulting ENOENT as "'weasyprint' not found", which
+        is how a broken PDF skill reached a user. Python tools are run as
+        `python3 -m <module>` instead: `python3` is a link to the interpreter
+        binary itself, so it survives the move.
+        """
+        bin_dir = ROOT / f".pixi/envs/{sandbox.ENV_NAME}/bin"
+        if not bin_dir.is_dir():
+            self.skipTest(f"the {sandbox.ENV_NAME} environment is not installed")
+        scripts = sorted((ROOT / "workspace/.agents/skills").glob("*/scripts/*.sh"))
+        self.assertTrue(scripts)
+        for script in scripts:
+            text = script.read_text()
+            # Commands it runs, plus the programs it asks another tool to run:
+            # `--pdf-engine=weasyprint` is how pandoc starts the PDF engine, and a
+            # name lookup on PATH is exactly what relocation breaks.
+            named = self.shell_commands(text) | set(re.findall(r"--pdf-engine=(\w[\w.+-]*)", text))
+            for program in sorted(named):
+                path = bin_dir / program
+                if not path.is_file():
+                    continue
+                content = path.read_bytes()  # follows a link to the binary
+                if not content.startswith(b"#!"):
+                    continue
+                shebang = content.split(b"\n", 1)[0].decode("utf-8", "replace")
+                with self.subTest(script=script.name, program=program):
+                    self.fail(
+                        f"{script.relative_to(ROOT)} runs {program!r}, which is a "
+                        f"script ({shebang}), not a program: its interpreter path "
+                        f"does not exist inside the sandbox. Run the Python module "
+                        f"instead - `python3 -m <module>`, as the PDF skill does "
+                        f"with `python3 -m weasyprint`."
+                    )
+
     @staticmethod
     def shell_commands(text):
         """Names run by a bash script, minus the functions it defines itself.

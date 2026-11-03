@@ -50,7 +50,11 @@ matplotlib = "*"
 # Reports: Markdown to PDF, plus PDF reading. `poppler` provides pdfinfo,
 # pdftotext and pdftoppm; `pandoc` and `weasyprint` are the PDF engine. A skill
 # script may only use these, coreutils, or a base Linux program - a test in
-# tests/test_skeleton.py enforces it, so add the package here first.
+# tests/test_skeleton.py enforces it, so add the package here first. A tool
+# written in Python is run as `python3 -m <module>`, never through the command
+# the package installs: that command's shebang names the directory the
+# environment was installed in, and the sandbox mounts it somewhere else.
+# tests/test_skeleton.py enforces that too.
 pandoc = "*"
 weasyprint = "*"
 poppler = "*"

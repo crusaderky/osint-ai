@@ -9,8 +9,13 @@
 # the source file is never modified. The rest of the document follows the
 # table of contents.
 #
-# Programs: coreutils, grep, sed, awk, mktemp, pandoc, weasyprint, pdfinfo.
+# Programs: coreutils, grep, sed, awk, mktemp, pandoc, python3, pdfinfo.
 # All of them are on the project environment PATH; nothing is installed here.
+# The PDF engine is the `weasyprint` Python package, run as `python3 -m
+# weasyprint` rather than as the environment's `weasyprint` command: that command
+# is a script whose first line names the directory the environment was installed
+# in, which is not where the sandbox mounts it, so it cannot start there and
+# pandoc reports "'weasyprint' not found".
 set -euo pipefail
 
 usage() {
@@ -45,7 +50,11 @@ done
 [[ -f $input ]] || { echo "No such Markdown file: $input" >&2; exit 1; }
 [[ -f $css ]] || { echo "No such stylesheet: $css" >&2; exit 1; }
 [[ -f $template ]] || { echo "No such template: $template" >&2; exit 1; }
-for tool in pandoc weasyprint pdfinfo; do
+# An image is named relative to the Markdown file (`![](images/map.png)`), but
+# both the HTML and the PDF are built somewhere else. Tell WeasyPrint what that
+# name is relative to, or the pictures stay out of the PDF.
+input_dir=$(cd -- "$(dirname -- "$input")" && pwd)
+for tool in pandoc python3 pdfinfo; do
     command -v "$tool" >/dev/null 2>&1 || {
         echo "Missing program: $tool (ask the developer to add it to pixi.toml)" >&2
         exit 1
@@ -91,17 +100,22 @@ doc_title=$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' <<<"$doc_title")
 # Metadata in a file, so a comma or a colon in the title is not misread.
 printf 'title: "%s"\nlang: "en"\n' "$doc_title" > "$work/meta.yaml"
 
+# Two steps on purpose: pandoc writes the HTML, WeasyPrint renders it. A
+# `--pdf-engine` would hide the second step behind a name lookup on PATH, and
+# that lookup is exactly what breaks when the environment is mounted somewhere
+# other than its install directory.
 log="$work/pandoc.log"
-if ! pandoc "$body" \
-    --output "$output" \
-    --standalone \
-    --template "$template" \
-    --from markdown+pipe_tables+task_lists+footnotes+strikeout+autolink_bare_uris+raw_html \
-    --pdf-engine=weasyprint \
-    --css "$css" \
-    --metadata-file "$work/meta.yaml" \
-    --include-before-body "$work/before.html" \
-    ${toc[@]+"${toc[@]}"} > "$log" 2>&1; then
+if ! { pandoc "$body" \
+        --output "$work/doc.html" \
+        --standalone --to html5 \
+        --template "$template" \
+        --from markdown+pipe_tables+task_lists+footnotes+strikeout+autolink_bare_uris+raw_html \
+        --css "$css" \
+        --metadata-file "$work/meta.yaml" \
+        --include-before-body "$work/before.html" \
+        ${toc[@]+"${toc[@]}"} > "$log" 2>&1 &&
+       python3 -m weasyprint --base-url "$input_dir" \
+           "$work/doc.html" "$output" >> "$log" 2>&1; }; then
     cat "$log" >&2
     echo "Conversion failed; no PDF was written to $output" >&2
     exit 1

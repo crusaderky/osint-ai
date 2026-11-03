@@ -85,13 +85,18 @@ section below.
 It installs the locked `default` environment, probes the bubblewrap that
 environment installed - the one the launcher execs - launches real Pi inside
 bubblewrap in the plain Linux (`--native`) layout, verifies that Pi's working
-directory is `/osint-ai/workspace` and that `git status` succeeds there, and
-verifies
+directory is `/osint-ai/workspace` and that `git status` succeeds there,
+builds a PDF with the packaged `markdown-pdf` skill inside the sandbox and
+asserts that `pdftotext` reads its text back, and verifies
 `/llama` registration plus discovery of a skill under
-`workspace/.agents/skills/`, without any model API calls. Also run Bash syntax
-checks and ShellCheck over `scripts/` and `windows/`, and install both Pixi
-environments to validate the local build recipes. Never claim Windows support
-based on the Python tests alone.
+`workspace/.agents/skills/`, without any model API calls. The PDF build matters
+because the environment is installed at `<copy>/.pixi` and mounted at
+`/osint-ai/.pixi`: building the same PDF on the host proves nothing about the
+path the assistant sees.
+
+Also run Bash syntax checks and ShellCheck over `scripts/` and `windows/`, and
+install both Pixi environments to validate the local build recipes. Never claim
+Windows support based on the Python tests alone.
 
 There is no Linux installer to test, by design. The check is that a clean Linux
 VM follows the README's Linux commands - including `pixi r install` - and ends up
@@ -131,13 +136,14 @@ items on delegation.
 * **Sandbox smoke test** (`ubuntu-latest`): `python3 tests/smoke_pixi_sandbox.py`,
   gated on a cheap `unshare` probe so a runner that cannot sandbox does not sit
   through a package download first. The job installs only the `pixi` binary; the
-  script copies the checkout, installs the locked environment into that copy, and
-  probes the bubblewrap that install produced. GitHub-hosted runners restrict
-  unprivileged user namespaces (AppArmor on Ubuntu 24.04), so there the job posts
-  a warning and does not run, and the script itself prints `SKIP: ...` and exits
-  0. Run it by hand where bubblewrap works. This job only probes: it deliberately
-  installs no AppArmor profile, while the inference job below runs
-  `pixi r install`, which does.
+  script copies the checkout, installs the locked environment into that copy,
+  probes the bubblewrap that install produced, and then starts Pi and builds a
+  PDF through the packaged `markdown-pdf` skill in that sandbox. GitHub-hosted
+  runners restrict unprivileged user namespaces (AppArmor on Ubuntu 24.04), so
+  there the job posts a warning and does not run, and the script itself prints
+  `SKIP: ...` and exits 0. Run it by hand where bubblewrap works. This job only
+  probes: it deliberately installs no AppArmor profile, while the inference job
+  below runs `pixi r install`, which does.
 
 * **Native Windows inference** (`windows-latest`): installs Pixi and the locked
   `llamacpp-binary-vulkan` environment - the only environment that resolves for
@@ -338,7 +344,11 @@ Test on clean Home and Pro machines/VMs with virtualization enabled:
       date and the optional contents list after it, that `pdfinfo`/`pdftotext`
       confirm and whose rendered page image is readable; `.notdef glyph`
       warnings are reported to the user instead of shipping empty boxes;
-      scanned PDFs are reported as unreadable.
+      scanned PDFs are reported as unreadable. That the conversion runs at all
+      inside the sandbox is covered on Linux by the smoke test; the font coverage
+      of a Windows installation, whose fallback fonts are the ones the WSL distro
+      has, is not, so check a Greek, Cyrillic or CJK character in the rendered
+      page image.
 - [ ] Windows junctions, symlinks, hardlinks and rename races across the shared
       directory boundary are tested. These require Windows tests, not Linux mocks.
 - [ ] OpenRouter OAuth URL/callback paste and API-key login work. Login, sessions

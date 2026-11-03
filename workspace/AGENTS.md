@@ -202,11 +202,14 @@ Rules for a sub-agent, and for the answer you build from it:
 * Save every deliverable under `workspace/` so the user can open it. Report
   paths as `workspace/...` (never Linux-only paths).
 * Available on `PATH`: `python` with `pandas`, `openpyxl`, `xlrd`, `pyxlsb`;
-  `pandoc`; `weasyprint`; `pdftotext`, `pdfinfo`, `pdftoppm`; plus standard Linux bash
-  commands such as `grep`, `sed`, etc. A skill may only use these; it cannot install
-  anything. Skills describe the recommended workflow: use the spreadsheet skill for
-  `.xls`/`.xlsx` work, the compliance-report skill to lay out a report, and the
-  Markdown/PDF skill to convert files.
+  `pandoc`; `pdftotext`, `pdfinfo`, `pdftoppm`; plus standard Linux bash
+  commands such as `grep`, `sed`, etc. The PDF engine, WeasyPrint, is run as
+  `python3 -m weasyprint IN.html OUT.pdf`: the `weasyprint` command itself was
+  installed at a path that does not exist here, so it fails to start. A skill may
+  only use these programs; it cannot install anything. Skills describe the
+  recommended workflow: use the spreadsheet skill for `.xls`/`.xlsx` work, the
+  compliance-report skill to lay out a report, and the Markdown/PDF skill to
+  convert files.
 * Network access is available for public sources. Do not upload private client
   data to third-party services.
 

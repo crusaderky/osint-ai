@@ -145,6 +145,52 @@ def main():
         ).stdout.strip()
         assert cwd == str(sandbox.WORKSPACE_MOUNT), f"Pi would start in {cwd}, not {sandbox.WORKSPACE_MOUNT}"
 
+        # The packaged PDF skill, run where the assistant runs it: the environment
+        # is installed in `<copy>/.pixi` and mounted at `/osint-ai/.pixi`, so every
+        # tool the skill uses has to work at the mounted path. That is a different
+        # thing from the host being able to build the same PDF, and it is what
+        # caught a `--pdf-engine=weasyprint` whose entry point could not start.
+        (workspace / "smoke-report.md").write_text(
+            "# Smoke report\n\nSmoke-PDF-OK\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n"
+        )
+        with logpath.open("a") as log:
+            built = subprocess.run(
+                sandbox.build_command(
+                    project,
+                    state,
+                    mode="native",
+                    command=[
+                        "bash",
+                        ".agents/skills/markdown-pdf/scripts/build-pdf.sh",
+                        "smoke-report.md",
+                        "--toc",
+                        "--date",
+                        "2026-01-01",
+                    ],
+                ),
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+        if built.returncode:
+            raise SystemExit(
+                f"Building a PDF in the sandbox failed ({built.returncode}). Log: {logpath}"
+            )
+        extracted = subprocess.run(
+            sandbox.build_command(
+                project,
+                state,
+                mode="native",
+                command=["pdftotext", "-layout", "smoke-report.pdf", "-"],
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert extracted.returncode == 0, extracted.stderr
+        assert "Smoke-PDF-OK" in extracted.stdout, f"the PDF has no readable text: {extracted.stdout!r}"
+        assert (workspace / "smoke-report.pdf").is_file(), "the PDF never reached workspace/"
+
         # RPC is used only by this test: it exercises real extension loading and
         # explicit .agents/skills discovery without calling a model.
         index = args.index("OSINT_PI_ARGS") + 1
@@ -176,7 +222,8 @@ def main():
                     process.wait()
         print(
             "Real environment, Pi startup inside bubblewrap, llama.cpp provider "
-            f"registration, .agents/skills discovery and a working git status: OK. Log: {logpath}"
+            "registration, .agents/skills discovery, a working git status and a "
+            f"PDF built by the packaged skill inside the sandbox: OK. Log: {logpath}"
         )
 
 

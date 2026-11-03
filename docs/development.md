@@ -421,6 +421,18 @@ may only run programs that a base Linux system has, or programs that `pixi.toml`
 declares. `tests/test_skeleton.py` enforces that, so a tool that would be missing
 at runtime fails the test suite instead of the skill.
 
+The environment is *mounted at a different path than the one it was installed
+at*: `pixi` writes absolute install paths into the environment itself, and
+`.pixi/envs/default/bin/weasyprint`, for example, starts with
+`#!/home/<someone>/github/osint-ai/.pixi/envs/default/bin/python3.14`. Inside the
+sandbox that path does not exist, `exec` fails with `ENOENT`, and the program
+reads as missing - pandoc said `'weasyprint' not found` for exactly that. So a
+Python tool is run as `python3 -m <module>` (`python3` is a link to the
+interpreter binary and survives the move), never through the command its package
+installs, and `tests/test_skeleton.py` fails a skill that does otherwise. The
+smoke test builds a PDF inside the real sandbox for the same reason; the host
+being able to build one proves nothing about the mounted path.
+
 ```bash
 pixi add <conda-package>          # or: pixi add --pypi <package>
 pixi lock
