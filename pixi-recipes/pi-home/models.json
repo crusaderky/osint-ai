@@ -6,9 +6,9 @@
       "apiKey": "local",
       "models": [
         {
-          "id": "MiniCPM5-2B",
-          "name": "MiniCPM5-2B (local)",
-          "contextWindow": 131072
+          "id": "LFM3-1.7B",
+          "name": "LFM3-1.7B (local)",
+          "contextWindow": 262144
         },
         {
           "id": "LFM2.5-230M",

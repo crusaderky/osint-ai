@@ -30,8 +30,9 @@ Adapted from the adjacent `pixi-llm-recipes` checkout supplied for this task:
   evaluation against 2643 tokens/s with the option off, and 22 tokens/s of
   decode against 190 - and upstream's router treats an unknown preset key as
   fatal, so a fork-only key is a server that does not start rather than one that
-  is slower. `models.ini` now quantizes both K and V to `q4_0`, which upstream
-  documents for both halves.
+  is slower. The `models.ini` presets quantize both halves of the KV cache today
+  (`q5_0` K with `q4_0` V for the work model, `q4_0` for both on the unit-test
+  preset), and upstream documents every one of those types for K and V alike.
 - `pi`: conda-forge pi-coding-agent, floating in the manifest and locked at
   1.4.0; Linux only. Raised from
   0.85.1 for `pi-subagents`, whose peer

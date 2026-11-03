@@ -120,7 +120,7 @@ better and cheaper models appear:
 | `deepseek-v4.1-flash-1017` | high or max | OpenRouter | $1.00 | By far the smartest model |
 | `glm-5.3-flash` | high **(not max)** | OpenRouter | $1.00 | Dumber than DeepSeek, but less likely to allucinate. Max thinking is much more expensive and not worth it. |
 | `mimo-v2.6-flash` | high | OpenRouter | $0.70 | *Substantially* dumber than DeepSeek, but cheaper |
-| `MiniCPM5-2B` | n/a | your PC | $0.01 (electricity) | *Much* dumber than the others; read [Use a local model](#use-a-local-model) |
+| `LFM3-1.7B` | n/a | your PC | $0.01 (electricity) | *Much* dumber than the others; read [Use a local model](#use-a-local-model) |
 
 As a rule of thumb:
 
@@ -146,7 +146,7 @@ should try them and find out which ones you prefer.
 
 ### Use a local model
 
-**MiniCPM5-2B** is a local model, which means it runs on your computer, doesn't require
+**LFM3-1.7B** is a local model, which means it runs on your computer, doesn't require
 you to pay anything, and nobody can read your conversations with it. **It is
 substantially less intelligent than the other models** and should be treated as
 experimental.
@@ -156,8 +156,8 @@ model should still run but it may be extremely slow.
 
 1. Double-click **Start llama.cpp**. A window opens, showing what the model is doing.
    Keep it open.
-2. Open the assistant in its own window, type `/model` and choose `MiniCPM5-2B (local)`.
-3. The first prompt will download the model file (~1.6 GB). After the initial download,
+2. Open the assistant in its own window, type `/model` and choose `LFM3-1.7B (local)`.
+3. The first prompt will download the model file (~1.2 GB). After the initial download,
    you won't need internet access anymore (as long as you work on local files only).
 4. When you're finished, close the llama.cpp window. This stops the server.
 
@@ -347,8 +347,8 @@ Or you can ask it to investigate the git history for you:
 | Replies are slow | Try a different model with `/model`, or lower `/thinking` where supported. |
 | A new rule or skill is not recognised | Type `/reload`. If the problem persists, ask the assistant to investigate. |
 | A teammate's changes are missing | In GitHub Desktop, click **Fetch origin**, then **Pull origin**, then type `/reload`. |
-| MiniCPM5-2B doesn't load | Double-click **Start llama.cpp**, keep its window open, and try again. If that window shows an error, share it with your maintainer. |
-| MiniCPM5-2B is extremely slow | You need a video card with at least 4GB RAM. This is separate from your main computer's RAM. |
+| LFM3-1.7B doesn't load | Double-click **Start llama.cpp**, keep its window open, and try again. If that window shows an error, share it with your maintainer. |
+| LFM3-1.7B is extremely slow | You need a video card with at least 4GB RAM. This is separate from your main computer's RAM. |
 | The assistant is too stupid | Try a different model. |
 | The assistant is too stupid and the smarter models are too expensive | Refine AGENTS.md and the skill files to make them idiot-proof. It's a good idea to spend more for a smarter model to write better skill files, and then use a dumber model to read them. |
 | It's painful to read the assistant's prose | Try a different model. Try guiding behaviour using AGENTS.md. |

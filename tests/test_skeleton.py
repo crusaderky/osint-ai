@@ -246,7 +246,7 @@ class ConfigurationTests(unittest.TestCase):
         for pattern in patterns:
             if pattern.split("/", 1)[0] == "llama.cpp":
                 self.assertIn(pattern, presets, f"{pattern} has no llama.cpp preset")
-        self.assertIn("llama.cpp/MiniCPM5-2B", patterns)
+        self.assertIn("llama.cpp/LFM3-1.7B", patterns)
         self.assertNotIn("llama.cpp/LFM2.5-230M", patterns)
 
     def test_readme_carries_the_shortlist_in_order_and_never_a_withdrawn_model(self):
@@ -945,7 +945,7 @@ class PiEntryTests(unittest.TestCase):
                 (bundled / name).write_text("{}")
             (bundled / "models.json").write_text(json.dumps({"providers": {}}))
             (bundled.parent / "web-search.json").write_text("{}")
-            self.shortlist(root, ["llama.cpp/MiniCPM5-2B"])
+            self.shortlist(root, ["llama.cpp/LFM3-1.7B"])
             skills = root / "workspace-skills"
             workspace = root / "workspace"
             workspace.mkdir()
@@ -1088,14 +1088,14 @@ class PiEntryTests(unittest.TestCase):
                             "baseUrl": "http://127.0.0.1:8080/v1",
                             "api": "openai-completions",
                             "apiKey": "local",
-                            "models": [{"id": "MiniCPM5-2B"}],
+                            "models": [{"id": "LFM3-1.7B"}],
                         }
                     }
                 }
             )
         )
         (bundled.parent / "web-search.json").write_text("{}")
-        self.shortlist(root, ["llama.cpp/MiniCPM5-2B"])
+        self.shortlist(root, ["llama.cpp/LFM3-1.7B"])
         return prefix, bundled
 
     def shortlist(self, root: Path, patterns, withdrawn=None):
@@ -1134,7 +1134,7 @@ class PiEntryTests(unittest.TestCase):
                 models["providers"]["llama.cpp"]["baseUrl"], "http://172.30.96.1:8080/v1"
             )
             self.assertEqual(
-                models["providers"]["llama.cpp"]["models"], [{"id": "MiniCPM5-2B"}]
+                models["providers"]["llama.cpp"]["models"], [{"id": "LFM3-1.7B"}]
             )
             self.assertEqual(stat.S_IMODE(live.stat().st_mode), 0o600)
             # Without the launcher's variable - a direct run, or a plain Linux
@@ -1175,7 +1175,7 @@ class PiEntryTests(unittest.TestCase):
                 [
                     "openrouter/deepseek/deepseek-v4.1-flash-1017",
                     "openrouter/xiaomi/mimo-v2.6-pro",
-                    "llama.cpp/MiniCPM5-2B",
+                    "llama.cpp/LFM3-1.7B",
                 ],
             )
             self.run_entry(root, prefix, home)
@@ -1188,7 +1188,7 @@ class PiEntryTests(unittest.TestCase):
                     # puts it.
                     "openrouter/deepseek/deepseek-v4.1-flash-1017",
                     "openrouter/xiaomi/mimo-v2.6-pro",
-                    "llama.cpp/MiniCPM5-2B",
+                    "llama.cpp/LFM3-1.7B",
                     "anthropic/claude-opus-4-8",
                 ],
             )
@@ -1236,7 +1236,7 @@ class PiEntryTests(unittest.TestCase):
                 [
                     "openrouter/deepseek/deepseek-v4.1-flash-1017",
                     "openrouter/z-ai/glm-5.3-flash",
-                    "llama.cpp/MiniCPM5-2B",
+                    "llama.cpp/LFM3-1.7B",
                 ],
             )
             self.run_entry(root, prefix, home)
@@ -1245,7 +1245,7 @@ class PiEntryTests(unittest.TestCase):
                 [
                     "openrouter/deepseek/deepseek-v4.1-flash-1017",
                     "openrouter/z-ai/glm-5.3-flash",
-                    "llama.cpp/MiniCPM5-2B",
+                    "llama.cpp/LFM3-1.7B",
                     "anthropic/claude-opus-4-8",
                     "openrouter/xiaomi/mimo-v2.6-flash",
                 ],
@@ -1285,7 +1285,7 @@ class PiEntryTests(unittest.TestCase):
                 root,
                 [
                     "openrouter/deepseek/deepseek-v4.1-flash-1017",
-                    "llama.cpp/MiniCPM5-2B",
+                    "llama.cpp/LFM3-1.7B",
                 ],
                 withdrawn=["openrouter/deepseek/deepseek-v4.1-flash"],
             )
@@ -1295,7 +1295,7 @@ class PiEntryTests(unittest.TestCase):
                 settings["enabledModels"],
                 [
                     "openrouter/deepseek/deepseek-v4.1-flash-1017",
-                    "llama.cpp/MiniCPM5-2B",
+                    "llama.cpp/LFM3-1.7B",
                     "anthropic/claude-opus-4-8",
                 ],
             )
@@ -1369,12 +1369,12 @@ class PiEntryTests(unittest.TestCase):
             home.mkdir()
             prefix, _bundled = self.bundled_prefix(root)
             self.assertEqual(prefix, root / ".pixi" / "envs" / sandbox.ENV_NAME)
-            self.shortlist(root, ["openrouter/z-ai/glm-5.3-flash", "llama.cpp/MiniCPM5-2B"])
+            self.shortlist(root, ["openrouter/z-ai/glm-5.3-flash", "llama.cpp/LFM3-1.7B"])
             self.run_entry(root, prefix, home)
             settings = json.loads((home / ".pi/agent/settings.json").read_text())
             self.assertEqual(
                 settings["enabledModels"],
-                ["openrouter/z-ai/glm-5.3-flash", "llama.cpp/MiniCPM5-2B"],
+                ["openrouter/z-ai/glm-5.3-flash", "llama.cpp/LFM3-1.7B"],
             )
 
     def test_entry_repairs_a_stale_npm_link_and_stale_paths(self):

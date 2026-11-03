@@ -3,10 +3,11 @@
     "openrouter/deepseek/deepseek-v4.1-flash-1017",
     "openrouter/z-ai/glm-5.3-flash",
     "openrouter/xiaomi/mimo-v2.6-flash",
-    "llama.cpp/MiniCPM5-2B"
+    "llama.cpp/LFM3-1.7B"
   ],
   "removedModels": [
     "openrouter/deepseek/deepseek-v4.1-flash",
-    "openrouter/xiaomi/mimo-v2.6-pro"
+    "openrouter/xiaomi/mimo-v2.6-pro",
+    "llama.cpp/MiniCPM5-2B"
   ]
 }
